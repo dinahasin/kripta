@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MenuPrincipal</class>
+ <widget class="QMainWindow" name="MenuPrincipal">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1000</width>
+    <height>700</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Kripta - Menu Principal</string>
+  </property>
+  <property name="windowIcon">
+   <iconset>
+    <normaloff>.</normaloff>.</iconset>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout_main">
+    <property name="spacing">
+     <number>20</number>
+    </property>
+    <property name="leftMargin">
+     <number>50</number>
+    </property>
+    <property name="topMargin">
+     <number>30</number>
+    </property>
+    <property name="rightMargin">
+     <number>50</number>
+    </property>
+    <property name="bottomMargin">
+     <number>50</number>
+    </property>
+    <item>
+     <widget class="QLabel" name="title_label">
+      <property name="text">
+       <string>Kripta</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignCenter</set>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">font-size: 36px; font-weight: bold; padding: 10px;</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <widget class="QLabel" name="subtitle_label">
+      <property name="text">
+       <string>Gestionnaire de mots de passe sécurisé, crypteur de fichiers et dossiers, et analyseur d'espace disque</string>
+      </property>
+      <property name="alignment">
+       <set>Qt::AlignCenter</set>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">font-size: 14px; color: #666666; padding-bottom: 20px;</string>
+      </property>
+      <property name="wordWrap">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_buttons">
+      <property name="spacing">
+       <number>20</number>
+      </property>
+      <item row="0" column="0">
+       <widget class="QPushButton" name="btn_password_manager">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>150</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">QPushButton {
+    font-size: 18px;
+    font-weight: bold;
+    padding: 20px;
+    border: 2px solid #3498db;
+    border-radius: 10px;
+    background-color: #ecf0f1;
+}
+QPushButton:hover {
+    background-color: #3498db;
+    color: white;
+}
+QPushButton:pressed {
+    background-color: #2980b9;
+}</string>
+        </property>
+        <property name="text">
+         <string>Gestionnaire
+de mots de passe</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QPushButton" name="btn_file_encryptor">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>150</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">QPushButton {
+    font-size: 18px;
+    font-weight: bold;
+    padding: 20px;
+    border: 2px solid #27ae60;
+    border-radius: 10px;
+    background-color: #ecf0f1;
+}
+QPushButton:hover {
+    background-color: #27ae60;
+    color: white;
+}
+QPushButton:pressed {
+    background-color: #229954;
+}</string>
+        </property>
+        <property name="text">
+         <string>Crypteur de fichiers</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <widget class="QPushButton" name="btn_disk_analyzer">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>1</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
+         <size>
+          <width>0</width>
+          <height>150</height>
+         </size>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">QPushButton {
+    font-size: 18px;
+    font-weight: bold;
+    padding: 20px;
+    border: 2px solid #e67e22;
+    border-radius: 10px;
+    background-color: #ecf0f1;
+}
+QPushButton:hover {
+    background-color: #e67e22;
+    color: white;
+}
+QPushButton:pressed {
+    background-color: #d35400;
+}</string>
+        </property>
+        <property name="text">
+         <string>Spaces optimisations</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>1000</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="menu_help">
+    <property name="title">
+     <string>Aide</string>
+    </property>
+    <addaction name="action_about"/>
+   </widget>
+   <addaction name="menu_help"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="action_about">
+   <property name="text">
+    <string>À propos</string>
+   </property>
+   <property name="toolTip">
+    <string>À propos de Kripta</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
