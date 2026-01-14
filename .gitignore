@@ -111,3 +111,5 @@ src/features/output/*
 .cursor/
 .windsurf/
 _bmad/
+.agent/
+.claude/

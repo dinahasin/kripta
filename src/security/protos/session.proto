@@ -1,0 +1,15 @@
+syntax = 'proto3';
+
+package kripta.security;
+
+message Session {
+  string session_id      = 1;
+  string username        = 2;  // Identité logique dans Kripta
+  string windows_user    = 3;  // Nom d'utilisateur Windows
+  int64  created_at      = 4;
+  int64  last_seen_at    = 5;
+  int64  expires_at      = 6;
+  bool   is_authenticated = 7;
+  bool   persistent      = 8;
+}
+
