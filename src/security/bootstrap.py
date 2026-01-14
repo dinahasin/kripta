@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 """
 Bootstrap de sécurité pour Kripta.
@@ -15,6 +15,7 @@ from typing import Optional
 import os
 import time
 import getpass
+import shutil
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -375,3 +376,38 @@ def load_security_profile() -> Optional[SecurityProfileData]:
     """
     from src.security.profile_protobuf import _load_security_profile
     return _load_security_profile()
+
+
+def reset_security_state() -> None:
+    """
+    Supprime toutes les données de sécurité locales :
+    - Profil de sécurité (mot de passe maître, métadonnées)
+    - Certificat applicatif et certificat utilisateur
+    - Clés de récupération enregistrées
+    - Dossier des mots de passe chiffrés
+    """
+    # Supprimer fichiers critiques
+    targets = [
+        SECURITY_PROFILE_FILE,
+        APP_CERT_FILE,
+        USER_CERT_FILE,
+        SECURITY_DIR / "recovery_key.kripta",
+    ]
+    for path in targets:
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception:
+            # On ignore les erreurs individuelles pour ne pas bloquer l'utilisateur
+            pass
+
+    # Nettoyer le dossier des mots de passe
+    try:
+        if PASSWORDS_DIR.exists():
+            for item in PASSWORDS_DIR.iterdir():
+                if item.is_file() or item.is_symlink():
+                    item.unlink(missing_ok=True)
+                elif item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+    except Exception:
+        pass

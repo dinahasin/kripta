@@ -1,4 +1,4 @@
-﻿"""
+"""
 Dialogues d'initialisation de la sécurité (PySide6).
 """
 

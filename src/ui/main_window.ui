@@ -195,6 +195,7 @@ QPushButton:pressed {
      <string>Aide</string>
     </property>
     <addaction name="action_about"/>
+    <addaction name="action_clear_security"/>
    </widget>
    <addaction name="menu_help"/>
   </widget>
@@ -205,6 +206,14 @@ QPushButton:pressed {
    </property>
    <property name="toolTip">
     <string>À propos de Kripta</string>
+   </property>
+  </action>
+  <action name="action_clear_security">
+   <property name="text">
+    <string>Effacer mes données de sécurité…</string>
+   </property>
+   <property name="toolTip">
+    <string>Supprimer toutes les données de sécurité locales (profil, certificats, mots de passe)</string>
    </property>
   </action>
  </widget>

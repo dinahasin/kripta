@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 ################################################################################
-## Form generated from reading UI file 'menu_principal.ui'
+## Form generated from reading UI file 'main_window.ui'
 ##
 ## Created by: Qt User Interface Compiler version 6.10.1
 ##
@@ -30,6 +30,8 @@ class Ui_MenuPrincipal(object):
         MenuPrincipal.setWindowIcon(icon)
         self.action_about = QAction(MenuPrincipal)
         self.action_about.setObjectName(u"action_about")
+        self.action_clear_security = QAction(MenuPrincipal)
+        self.action_clear_security.setObjectName(u"action_clear_security")
         self.centralwidget = QWidget(MenuPrincipal)
         self.centralwidget.setObjectName(u"centralwidget")
         self.verticalLayout_main = QVBoxLayout(self.centralwidget)
@@ -142,6 +144,7 @@ class Ui_MenuPrincipal(object):
 
         self.menubar.addAction(self.menu_help.menuAction())
         self.menu_help.addAction(self.action_about)
+        self.menu_help.addAction(self.action_clear_security)
 
         self.retranslateUi(MenuPrincipal)
 
@@ -153,6 +156,10 @@ class Ui_MenuPrincipal(object):
         self.action_about.setText(QCoreApplication.translate("MenuPrincipal", u"\u00c0 propos", None))
 #if QT_CONFIG(tooltip)
         self.action_about.setToolTip(QCoreApplication.translate("MenuPrincipal", u"\u00c0 propos de Kripta", None))
+#endif // QT_CONFIG(tooltip)
+        self.action_clear_security.setText(QCoreApplication.translate("MenuPrincipal", u"Effacer mes donn\u00e9es de s\u00e9curit\u00e9\u2026", None))
+#if QT_CONFIG(tooltip)
+        self.action_clear_security.setToolTip(QCoreApplication.translate("MenuPrincipal", u"Supprimer toutes les donn\u00e9es de s\u00e9curit\u00e9 locales (profil, certificats, mots de passe)", None))
 #endif // QT_CONFIG(tooltip)
         self.title_label.setText(QCoreApplication.translate("MenuPrincipal", u"Kripta", None))
         self.subtitle_label.setText(QCoreApplication.translate("MenuPrincipal", u"Gestionnaire de mots de passe s\u00e9curis\u00e9, crypteur de fichiers et dossiers, et analyseur d'espace disque", None))
