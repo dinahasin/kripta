@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                                QListWidget, QListWidgetItem, QLabel, QLineEdit, 
-                               QTextEdit, QPushButton, QMessageBox, QSplitter, QFrame)
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QColor
+                               QTextEdit, QPushButton, QMessageBox, QSplitter, QFrame, QApplication)
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QFont, QColor, QDesktopServices
 from src.password_manager.service import PasswordManagerService
 from src.password_manager.models import PasswordEntry
+import re
 
 class PasswordManagerWidget(QWidget):
     """Widget du gestionnaire de mots de passe intégré dans la fenêtre principale."""
@@ -18,6 +19,10 @@ class PasswordManagerWidget(QWidget):
         self.setup_ui()
         self.apply_modern_style()
         self.refresh_list()
+        
+        # Définir une taille minimale pour la fenêtre
+        if parent:
+            parent.setMinimumSize(1100, 700)
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -70,7 +75,7 @@ class PasswordManagerWidget(QWidget):
         list_font.setPointSize(14)
         list_font.setBold(True)
         lbl_list.setFont(list_font)
-        lbl_list.setStyleSheet("color: #ffffff; padding: 10px;")
+        lbl_list.setStyleSheet("color: #ffffff; padding: 10px; background-color: transparent;")
         left_layout.addWidget(lbl_list)
         
         self.list_widget = QListWidget()
@@ -117,19 +122,33 @@ class PasswordManagerWidget(QWidget):
         right_layout.addWidget(lbl_title_field)
         self.txt_title = QLineEdit()
         self.txt_title.setPlaceholderText("Ex: Gmail, Facebook...")
-        self.txt_title.setMinimumHeight(40)
+        self.txt_title.setMinimumHeight(45)
         right_layout.addWidget(self.txt_title)
 
-        # Username
+        # Username with copy button
         lbl_username = QLabel("Nom d'utilisateur / Email")
         lbl_username.setStyleSheet("font-weight: bold; color: #34495e; font-size: 11px;")
         right_layout.addWidget(lbl_username)
+        
+        hbox_username = QHBoxLayout()
+        hbox_username.setSpacing(10)
         self.txt_username = QLineEdit()
         self.txt_username.setPlaceholderText("Ex: utilisateur@example.com")
-        self.txt_username.setMinimumHeight(40)
-        right_layout.addWidget(self.txt_username)
+        self.txt_username.setMinimumHeight(45)
+        
+        btn_copy_username = QPushButton("📋")
+        btn_copy_username.setObjectName("btnCopy")
+        btn_copy_username.setMaximumWidth(50)
+        btn_copy_username.setMinimumHeight(45)
+        btn_copy_username.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_copy_username.setToolTip("Copier le nom d'utilisateur")
+        btn_copy_username.clicked.connect(self.copy_username)
+        
+        hbox_username.addWidget(self.txt_username)
+        hbox_username.addWidget(btn_copy_username)
+        right_layout.addLayout(hbox_username)
 
-        # Password
+        # Password with copy and toggle buttons
         lbl_password = QLabel("Mot de passe")
         lbl_password.setStyleSheet("font-weight: bold; color: #34495e; font-size: 11px;")
         right_layout.addWidget(lbl_password)
@@ -139,28 +158,51 @@ class PasswordManagerWidget(QWidget):
         self.txt_password = QLineEdit()
         self.txt_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_password.setPlaceholderText("Votre mot de passe sécurisé...")
-        self.txt_password.setMinimumHeight(40)
+        self.txt_password.setMinimumHeight(45)
+        
+        btn_copy_password = QPushButton("📋")
+        btn_copy_password.setObjectName("btnCopy")
+        btn_copy_password.setMaximumWidth(50)
+        btn_copy_password.setMinimumHeight(45)
+        btn_copy_password.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_copy_password.setToolTip("Copier le mot de passe")
+        btn_copy_password.clicked.connect(self.copy_password)
         
         self.btn_toggle_pwd = QPushButton("👁")
         self.btn_toggle_pwd.setCheckable(True)
         self.btn_toggle_pwd.clicked.connect(self.toggle_password_visibility)
         self.btn_toggle_pwd.setMaximumWidth(50)
-        self.btn_toggle_pwd.setMinimumHeight(40)
+        self.btn_toggle_pwd.setMinimumHeight(45)
         self.btn_toggle_pwd.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_toggle_pwd.setToolTip("Afficher/Masquer le mot de passe")
         
         hbox_pwd.addWidget(self.txt_password)
+        hbox_pwd.addWidget(btn_copy_password)
         hbox_pwd.addWidget(self.btn_toggle_pwd)
         right_layout.addLayout(hbox_pwd)
 
-        # URL
+        # URL with open button
         lbl_url = QLabel("URL / Site web")
         lbl_url.setStyleSheet("font-weight: bold; color: #34495e; font-size: 11px;")
         right_layout.addWidget(lbl_url)
+        
+        hbox_url = QHBoxLayout()
+        hbox_url.setSpacing(10)
         self.txt_url = QLineEdit()
         self.txt_url.setPlaceholderText("https://example.com")
-        self.txt_url.setMinimumHeight(40)
-        right_layout.addWidget(self.txt_url)
+        self.txt_url.setMinimumHeight(45)
+        
+        btn_open_url = QPushButton("🌐")
+        btn_open_url.setObjectName("btnOpenUrl")
+        btn_open_url.setMaximumWidth(50)
+        btn_open_url.setMinimumHeight(45)
+        btn_open_url.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_open_url.setToolTip("Ouvrir dans le navigateur")
+        btn_open_url.clicked.connect(self.open_url)
+        
+        hbox_url.addWidget(self.txt_url)
+        hbox_url.addWidget(btn_open_url)
+        right_layout.addLayout(hbox_url)
 
         # Notes
         lbl_notes = QLabel("Notes")
@@ -168,7 +210,7 @@ class PasswordManagerWidget(QWidget):
         right_layout.addWidget(lbl_notes)
         self.txt_notes = QTextEdit()
         self.txt_notes.setPlaceholderText("Informations supplémentaires...")
-        self.txt_notes.setMinimumHeight(80)
+        self.txt_notes.setMaximumHeight(60)
         right_layout.addWidget(self.txt_notes)
 
         # Spacer
@@ -339,6 +381,21 @@ class PasswordManagerWidget(QWidget):
                 color: white;
                 border: 2px solid #2980b9;
             }
+            
+            #btnCopy, #btnOpenUrl {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                font-size: 16px;
+            }
+            
+            #btnCopy:hover, #btnOpenUrl:hover {
+                background-color: #2980b9;
+            }
+            
+            #btnCopy:pressed, #btnOpenUrl:pressed {
+                background-color: #21618c;
+            }
         """)
 
     def refresh_list(self):
@@ -425,6 +482,64 @@ class PasswordManagerWidget(QWidget):
             self.right_widget.setEnabled(False)
             QMessageBox.information(self, "Suppression", "✓ Entrée supprimée avec succès.")
 
+    def copy_username(self):
+        """Copie le nom d'utilisateur dans le presse-papiers."""
+        username = self.txt_username.text()
+        if username:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(username)
+            QMessageBox.information(self, "Copié", "✓ Nom d'utilisateur copié dans le presse-papiers !")
+        else:
+            QMessageBox.warning(self, "Attention", "Aucun nom d'utilisateur à copier.")
+    
+    def copy_password(self):
+        """Copie le mot de passe dans le presse-papiers."""
+        password = self.txt_password.text()
+        if password:
+            clipboard = QApplication.clipboard()
+            clipboard.setText(password)
+            QMessageBox.information(self, "Copié", "✓ Mot de passe copié dans le presse-papiers !")
+        else:
+            QMessageBox.warning(self, "Attention", "Aucun mot de passe à copier.")
+    
+    def open_url(self):
+        """Ouvre l'URL dans le navigateur après validation."""
+        url = self.txt_url.text().strip()
+        
+        if not url:
+            QMessageBox.warning(self, "Attention", "Aucune URL à ouvrir.")
+            return
+        
+        # Regex pour valider l'URL
+        url_pattern = re.compile(
+            r'^https?://'
+            r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'
+            r'localhost|'
+            r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+            r'(?::\d+)?'
+            r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+        
+        # Si l'URL ne commence pas par http:// ou https://, ajouter https://
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        
+        # Valider l'URL
+        if not url_pattern.match(url):
+            reply = QMessageBox.question(
+                self,
+                "URL invalide",
+                f"L'URL '{url}' ne semble pas valide.\n\nVoulez-vous quand même l'ouvrir ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        
+        # Ouvrir l'URL
+        if QDesktopServices.openUrl(QUrl(url)):
+            QMessageBox.information(self, "Succès", "✓ URL ouverte dans le navigateur !")
+        else:
+            QMessageBox.critical(self, "Erreur", "Impossible d'ouvrir l'URL.")
+    
     def toggle_password_visibility(self):
         if self.btn_toggle_pwd.isChecked():
             self.txt_password.setEchoMode(QLineEdit.EchoMode.Normal)
