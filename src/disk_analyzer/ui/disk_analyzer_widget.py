@@ -83,7 +83,7 @@ class DiskAnalysisPage(QWidget):
         
         self.btn_scan = QPushButton("🔍 Scanner")
         self.btn_scan.setObjectName("btnScan")
-        self.btn_scan.setMinimumHeight(35)
+        self.btn_scan.setMinimumHeight(28)
         self.btn_scan.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_scan.clicked.connect(self.start_scan)
         toolbar_layout.addWidget(self.btn_scan)
@@ -97,7 +97,7 @@ class DiskAnalysisPage(QWidget):
         
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("Rechercher un fichier ou dossier...")
-        self.txt_search.setMinimumHeight(35)
+        self.txt_search.setMinimumHeight(28)
         self.txt_search.setMaximumWidth(400)  # Limite la largeur de la recherche
         self.txt_search.returnPressed.connect(self.perform_search)
         toolbar_layout.addWidget(self.txt_search)
@@ -105,7 +105,7 @@ class DiskAnalysisPage(QWidget):
         self.btn_search = QPushButton("🔎")
         self.btn_search.setObjectName("btnSearch")
         self.btn_search.setMaximumWidth(40)
-        self.btn_search.setMinimumHeight(35)
+        self.btn_search.setMinimumHeight(28)
         self.btn_search.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_search.clicked.connect(self.perform_search)
         toolbar_layout.addWidget(self.btn_search)
@@ -161,53 +161,16 @@ class DiskAnalysisPage(QWidget):
         self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderLabels(["Nom", "Taille", "Type"])
         self.tree_widget.setColumnWidth(0, 250)
-        self.tree_widget.setAnimated(True)  # Animation lors du dépliage
-        self.tree_widget.setIndentation(20)  # Indentation pour les niveaux
+        self.tree_widget.setAnimated(True)
+        self.tree_widget.setIndentation(20)
+        # Scroll horizontal
+        self.tree_widget.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.tree_widget.header().setStretchLastSection(False)
+        self.tree_widget.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.tree_widget.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
         self.tree_widget.itemClicked.connect(self.on_tree_item_clicked)
         self.tree_widget.itemExpanded.connect(self.on_tree_item_expanded)
         left_layout.addWidget(self.tree_widget)
-        
-        # --- DEBUG: ARBRE STATIQUE (DEMANDE UTILISATEUR) ---
-        from PySide6.QtWidgets import QGroupBox
-        group_debug = QGroupBox("Démo Arborescence Statique (Preuve de Concept)")
-        group_debug.setStyleSheet("QGroupBox { font-weight: bold; color: #e67e22; border: 1px solid #e67e22; margin-top: 10px; }")
-        layout_debug = QVBoxLayout(group_debug)
-        debug_tree = QTreeWidget()
-        debug_tree.setHeaderLabels(["Nom", "Taille", "Type"])
-        debug_tree.setAnimated(True)
-        debug_tree.setIndentation(20)
-        
-        # Création fausses données
-        root_demo = QTreeWidgetItem(["Disque Exemple (C:)", "100 GB", "Disque"])
-        # Note: get_file_icon methods might need self if used here? Yes self exists.
-        # But ensure get_file_icon is defined? Yes it is.
-        try:
-            root_demo.setIcon(0, self.get_file_icon(NodeType.DIR))
-        except: pass 
-        
-        debug_tree.addTopLevelItem(root_demo)
-        
-        folder1 = QTreeWidgetItem(["Documents", "10 GB", "Dossier"])
-        try: folder1.setIcon(0, self.get_file_icon(NodeType.DIR))
-        except: pass
-        root_demo.addChild(folder1)
-        
-        file1 = QTreeWidgetItem(["Rapport_Projet.pdf", "2 MB", "Fichier"])
-        try: file1.setIcon(0, self.get_file_icon(NodeType.FILE, ".pdf"))
-        except: pass
-        
-        subfolder = QTreeWidgetItem(["Projet Kripta", "5 MB", "Dossier"])
-        try: subfolder.setIcon(0, self.get_file_icon(NodeType.DIR))
-        except: pass
-        folder1.addChild(subfolder)
-        subfolder.addChild(file1)
-        
-        root_demo.setExpanded(True)
-        folder1.setExpanded(True)
-        subfolder.setExpanded(True)
-        
-        layout_debug.addWidget(debug_tree)
-        left_layout.addWidget(group_debug)
         
         content_splitter.addWidget(left_widget)
         
@@ -365,7 +328,11 @@ class DiskAnalysisPage(QWidget):
         parent_id = None
         if parent_item:
             node = parent_item.data(0, Qt.ItemDataRole.UserRole)
-            parent_id = node.id if node else None
+            # Support rétrocompatibilité
+            if isinstance(node, int):
+                parent_id = node
+            elif node and hasattr(node, 'id'):
+                parent_id = node.id
             
         # Récupérer les enfants depuis la DB
         try:
@@ -455,32 +422,68 @@ class DiskAnalysisPage(QWidget):
         if not self.current_disk:
             return
         
+        # Normaliser le chemin du disque pour être cohérent
+        from ..sqlite_service import SQLiteService
+        normalized_disk = SQLiteService.normalize_path(self.current_disk)
+        
         # Récupérer le nœud racine
-        root_node = self.coordinator.get_node_by_path(self.current_disk)
+        root_node = self.coordinator.get_node_by_path(normalized_disk)
         if not root_node:
-            return
+            # Si le nœud n'existe pas, essayer de le trouver avec le chemin original
+            root_node = self.coordinator.get_node_by_path(self.current_disk)
+            if not root_node:
+                return
+        
+        # Corriger la hiérarchie pour ce disque si nécessaire (une seule fois)
+        # Cela garantit que tous les parent_id sont corrects
+        try:
+            fixed = self.coordinator.fix_hierarchy(normalized_disk)
+            if fixed > 0:
+                print(f"Correction de {fixed} nœuds dans la hiérarchie pour {normalized_disk}")
+                # Recharger le nœud racine après correction
+                root_node = self.coordinator.get_node_by_path(normalized_disk)
+                if not root_node:
+                    root_node = self.coordinator.get_node_by_path(self.current_disk)
+        except Exception as e:
+            print(f"Erreur lors de la correction de la hiérarchie: {e}")
         
         # Créer l'item racine
         root_item = QTreeWidgetItem([f"💽 {root_node.name}", self.format_size(root_node.size), "Disque"])
-        root_item.setData(0, Qt.ItemDataRole.UserRole, root_node.id)
+        root_item.setData(0, Qt.ItemDataRole.UserRole, root_node)  # Stocker le Node complet, pas juste l'ID
         self.tree_widget.addTopLevelItem(root_item)
         
         # Charger le contenu du disque
-        self.load_tree_children(root_item, root_node.id)
+        if root_node.id:
+            self.load_tree_children(root_item, root_node.id)
         root_item.setExpanded(True)
         
 
     
     def load_tree_children(self, parent_item: QTreeWidgetItem, parent_id: int):
         """Charge les enfants d'un nœud dans l'arbre."""
-        children = self.coordinator.get_children(parent_id)
+        if not parent_id:
+            return
+        
+        try:
+            children = self.coordinator.get_children(parent_id)
+        except Exception as e:
+            print(f"Erreur lors de la récupération des enfants pour parent_id={parent_id}: {e}")
+            return
+        
+        if not children:
+            return
         
         for child in children:
             size_str = self.format_size(child.size) if child.type == NodeType.FILE else ""
             type_str = "Dossier" if child.type == NodeType.DIR else "Fichier"
             
             item = QTreeWidgetItem([child.name, size_str, type_str])
-            item.setData(0, Qt.ItemDataRole.UserRole, child.id)
+            item.setData(0, Qt.ItemDataRole.UserRole, child)  # Stocker le Node complet, pas juste l'ID
+            
+            # Nom en gras
+            font = item.font(0)
+            font.setBold(True)
+            item.setFont(0, font)
             
             # Ajouter des icônes pour dossiers et fichiers
             if child.type == NodeType.DIR:
@@ -499,9 +502,14 @@ class DiskAnalysisPage(QWidget):
     
     def on_tree_item_expanded(self, item: QTreeWidgetItem):
         """Appelé quand un item est déplié - lazy loading."""
-        node_id = item.data(0, Qt.ItemDataRole.UserRole)
-        if not node_id:
-            return
+        node = item.data(0, Qt.ItemDataRole.UserRole)
+        if not node or not hasattr(node, 'id'):
+            # Support rétrocompatibilité si on a stocké juste l'ID
+            node_id = node if isinstance(node, int) else None
+            if not node_id:
+                return
+        else:
+            node_id = node.id
         
         # Charger les enfants si c'est la première fois (placeholder présent)
         if item.childCount() == 1 and item.child(0).text(0) == "...":
@@ -510,8 +518,16 @@ class DiskAnalysisPage(QWidget):
     
     def on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """Appelé quand un item de l'arbre est cliqué."""
-        node_id = item.data(0, Qt.ItemDataRole.UserRole)
-        if not node_id:
+        node = item.data(0, Qt.ItemDataRole.UserRole)
+        if not node:
+            return
+        
+        # Support rétrocompatibilité si on a stocké juste l'ID
+        if isinstance(node, int):
+            node_id = node
+        elif hasattr(node, 'id'):
+            node_id = node.id
+        else:
             return
         
         # Afficher les détails
@@ -552,7 +568,7 @@ class DiskAnalysisPage(QWidget):
                     icon = self.get_file_icon(node.extension)
                     item.setText(0, f"{icon} {node.name}")
                     
-                item.setData(0, Qt.ItemDataRole.UserRole, node.id)
+                item.setData(0, Qt.ItemDataRole.UserRole, node)  # Stocker le Node complet
                 item.setToolTip(0, node.path)
                 self.tree_widget.addTopLevelItem(item)
         

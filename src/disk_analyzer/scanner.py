@@ -5,8 +5,9 @@ File system scanner for disk analysis.
 import os
 import time
 from pathlib import Path
-from typing import List, Set, Callable, Optional
+from typing import List, Set, Callable, Optional, Dict
 from .models import Node, NodeType
+from .sqlite_service import SQLiteService
 import string
 import fnmatch
 
@@ -93,13 +94,16 @@ class DiskScanner:
                 try:
                     stat = entry.stat(follow_symlinks=False)
                     
+                    # Normaliser le chemin pour garantir la cohérence
+                    normalized_path = SQLiteService.normalize_path(entry.path)
+                    
                     # Créer le nœud
                     node = Node(
                         id=None,
                         parent_id=parent_id,
                         type=NodeType.DIR if entry.is_dir(follow_symlinks=False) else NodeType.FILE,
                         name=entry.name,
-                        path=entry.path,
+                        path=normalized_path,  # Utiliser le chemin normalisé
                         size=stat.st_size if entry.is_file() else 0,
                         mtime=stat.st_mtime,
                         ctime=stat.st_ctime,
@@ -152,22 +156,31 @@ class DiskScanner:
         """
         seen_paths = set()
         
-        # Le root parent_id doit être trouvé dans existing_paths ou via le callback
-        root_id = existing_paths.get(disk_path)
+        # Normaliser le chemin du disque
+        normalized_disk_path = SQLiteService.normalize_path(disk_path)
+        
+        # Le root parent_id doit être trouvé dans existing_paths (chercher avec chemin normalisé)
+        root_id = existing_paths.get(normalized_disk_path)
         if root_id is None:
+            # Essayer avec le chemin original aussi
+            root_id = existing_paths.get(disk_path)
             # Essayer avec ou sans slash final pour être robuste (ex: "C:" vs "C:\\")
-            if disk_path.endswith(os.sep):
-                root_id = existing_paths.get(disk_path.rstrip(os.sep))
-            else:
-                root_id = existing_paths.get(disk_path + os.sep)
-                
-            # Essayer aussi le slash inverse si window
-            if root_id is None and os.name == 'nt':
-                 alt_sep = '/' if os.sep == '\\' else '\\'
-                 if disk_path.endswith(alt_sep):
-                     root_id = existing_paths.get(disk_path.rstrip(alt_sep))
-                 else:
-                     root_id = existing_paths.get(disk_path + alt_sep)
+            if root_id is None:
+                if normalized_disk_path.endswith(os.sep):
+                    root_id = existing_paths.get(normalized_disk_path.rstrip(os.sep))
+                else:
+                    root_id = existing_paths.get(normalized_disk_path + os.sep)
+                    
+                # Essayer aussi le slash inverse si window
+                if root_id is None and os.name == 'nt':
+                     alt_sep = '/' if os.sep == '\\' else '\\'
+                     alt_path = normalized_disk_path.replace(os.sep, alt_sep)
+                     root_id = existing_paths.get(alt_path)
+                     if root_id is None:
+                         if alt_path.endswith(alt_sep):
+                             root_id = existing_paths.get(alt_path.rstrip(alt_sep))
+                         else:
+                             root_id = existing_paths.get(alt_path + alt_sep)
 
         def scan_recursive(path: str, parent_id: Optional[int]):
             if self._stop_requested:
@@ -183,11 +196,17 @@ class DiskScanner:
                     try:
                         stat = entry.stat(follow_symlinks=False)
                         entry_path = entry.path
-                        seen_paths.add(entry_path)
                         
-                        # Vérifier si le fichier existe déjà
+                        # Normaliser le chemin pour garantir la cohérence
+                        normalized_path = SQLiteService.normalize_path(entry_path)
+                        seen_paths.add(normalized_path)
+                        
+                        # Vérifier si le fichier existe déjà (chercher avec le chemin normalisé)
                         # existing_paths est maintenant Dict[path, id]
-                        existing_id = existing_paths.get(entry_path)
+                        existing_id = existing_paths.get(normalized_path)
+                        # Si pas trouvé, essayer avec le chemin original
+                        if existing_id is None:
+                            existing_id = existing_paths.get(entry_path)
                         is_new = existing_id is None
                         
                         node = Node(
@@ -195,12 +214,20 @@ class DiskScanner:
                             parent_id=parent_id,
                             type=NodeType.DIR if entry.is_dir() else NodeType.FILE,
                             name=entry.name,
-                            path=entry_path,
+                            path=normalized_path,  # Utiliser le chemin normalisé
                             size=stat.st_size if entry.is_file() else 0,
                             mtime=stat.st_mtime,
                             ctime=stat.st_ctime,
                             extension=Path(entry.name).suffix.lower() if entry.is_file() else None
                         )
+                        
+                        # Mettre à jour existing_paths avec le chemin normalisé
+                        if is_new and node_callback:
+                            # L'ID sera ajouté après l'insertion
+                            pass
+                        elif existing_id:
+                            # S'assurer que le chemin normalisé est dans existing_paths
+                            existing_paths[normalized_path] = existing_id
                         
                         current_id = existing_id
                         
@@ -209,8 +236,8 @@ class DiskScanner:
                             if node_callback:
                                 current_id = node_callback(node)
                                 node.id = current_id
-                                # On met à jour le dict local pour les futurs enfants
-                                existing_paths[entry_path] = current_id
+                                # On met à jour le dict local pour les futurs enfants (avec chemin normalisé)
+                                existing_paths[normalized_path] = current_id
                         elif node_callback:
                             # Optionnel: notifier mise à jour (taille/date)
                             # Pour l'instant on suppose que update est géré ailleurs ou pas nécessaire pour l'ID
@@ -220,7 +247,8 @@ class DiskScanner:
                         if entry.is_dir():
                             # Si on n'a pas d'ID (ex: erreur insert), on ne peut pas lier les enfants
                             if current_id is not None:
-                                scan_recursive(entry_path, current_id)
+                                # Utiliser le chemin normalisé pour la récursion
+                                scan_recursive(normalized_path, current_id)
                         
                         self.scanned_count += 1
                         if self.progress_callback and self.scanned_count % 100 == 0:
@@ -232,11 +260,11 @@ class DiskScanner:
             except (PermissionError, OSError):
                 pass
         
-        # Démarrer le scan récursif
+        # Démarrer le scan récursif (utiliser le chemin normalisé)
         # Si root_id est None, les éléments à la racine auront parent_id=None (correct pour racine disque ?)
         # Non, la racine disque elle-même a déjà été insérée par scan_disk dans sync_coordinator
-        # Donc tous les éléments de scandir(disk_path) doivent avoir parent_id = root_id
-        scan_recursive(disk_path, root_id)
+        # Donc tous les éléments de scandir(normalized_disk_path) doivent avoir parent_id = root_id
+        scan_recursive(normalized_disk_path, root_id)
         
         return [], seen_paths
     

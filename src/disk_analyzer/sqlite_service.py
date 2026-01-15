@@ -3,6 +3,7 @@ SQLite service for hierarchical storage and analytics.
 """
 
 import sqlite3
+import os
 from pathlib import Path
 from typing import List, Optional, Tuple
 from .models import Node, NodeType, DiskStats
@@ -15,6 +16,104 @@ class SQLiteService:
         self.db_path = db_path
         self.conn = None
         self._initialize_db()
+    
+    @staticmethod
+    def normalize_path(path: str) -> str:
+        """
+        Normalise un chemin pour garantir la cohérence dans la base de données.
+        - Convertit les backslashes en slashes sur Windows (ou l'inverse selon l'OS)
+        - Supprime les slashes finaux sauf pour les racines de disque
+        - Résout les chemins relatifs
+        """
+        if not path:
+            return path
+        
+        # Utiliser Path pour normaliser
+        path_obj = Path(path)
+        
+        # Normaliser le chemin (résout les .., ., etc.)
+        try:
+            normalized = path_obj.resolve()
+        except (OSError, ValueError):
+            # Si le chemin n'existe pas, utiliser la normalisation de string
+            normalized = path_obj
+        
+        # Convertir en string
+        normalized_str = str(normalized)
+        
+        # Sur Windows, normaliser les slashes
+        if os.name == 'nt':
+            # Garder les backslashes pour Windows (standard)
+            normalized_str = normalized_str.replace('/', '\\')
+            # Pour les racines de disque (C:, D:, etc.), s'assurer qu'elles ont un backslash final
+            if len(normalized_str) == 2 and normalized_str[1] == ':':
+                normalized_str += '\\'
+        else:
+            # Sur Unix/Linux, utiliser des slashes
+            normalized_str = normalized_str.replace('\\', '/')
+            # S'assurer que la racine a un slash final
+            if normalized_str == '/':
+                pass  # Déjà correct
+            elif not normalized_str.endswith('/'):
+                # Pour les dossiers, on pourrait vouloir garder le slash final
+                # Mais pour l'instant, on le supprime pour être cohérent
+                pass
+        
+        return normalized_str
+    
+    def resolve_parent_id(self, path: str) -> Optional[int]:
+        """
+        Résout le parent_id d'un chemin en cherchant le parent dans la base.
+        Retourne None si le parent n'existe pas ou si c'est une racine.
+        """
+        if not path:
+            return None
+        
+        normalized_path = self.normalize_path(path)
+        path_obj = Path(normalized_path)
+        
+        # Si c'est une racine (disque sur Windows ou / sur Unix), pas de parent
+        if os.name == 'nt':
+            # Sur Windows, une racine est de la forme "C:\"
+            if len(normalized_path) == 3 and normalized_path[1] == ':' and normalized_path[2] == '\\':
+                return None
+        else:
+            # Sur Unix, la racine est "/"
+            if normalized_path == '/':
+                return None
+        
+        # Obtenir le chemin du parent
+        try:
+            parent_path = str(path_obj.parent)
+            # Normaliser aussi le parent
+            parent_path = self.normalize_path(parent_path)
+            
+            # Si le parent est identique au chemin actuel, c'est une racine
+            if parent_path == normalized_path:
+                return None
+            
+            # Chercher le parent dans la base
+            parent_node = self.get_node_by_path(parent_path)
+            if parent_node:
+                return parent_node.id
+            
+            # Essayer des variantes du chemin parent
+            # Par exemple, si le parent est "C:" on essaie "C:\"
+            if os.name == 'nt':
+                if not parent_path.endswith('\\'):
+                    parent_variant = parent_path + '\\'
+                    parent_node = self.get_node_by_path(parent_variant)
+                    if parent_node:
+                        return parent_node.id
+                elif parent_path.endswith('\\') and len(parent_path) > 3:
+                    parent_variant = parent_path.rstrip('\\')
+                    parent_node = self.get_node_by_path(parent_variant)
+                    if parent_node:
+                        return parent_node.id
+            
+            return None
+        except Exception:
+            return None
     
     def _initialize_db(self):
         """Initialise la base de données et crée les tables."""
@@ -76,32 +175,116 @@ class SQLiteService:
         self.conn.commit()
     
     def add_node(self, node: Node) -> int:
-        """Ajoute un nœud et retourne son ID."""
+        """
+        Ajoute un nœud et retourne son ID.
+        Normalise le chemin et résout automatiquement le parent_id si nécessaire.
+        Vérifie aussi que le parent_id fourni est correct.
+        """
+        # Normaliser le chemin
+        normalized_path = self.normalize_path(node.path)
+        
+        # Résoudre le parent_id correct depuis le chemin
+        correct_parent_id = self.resolve_parent_id(normalized_path)
+        
+        # Utiliser le parent_id fourni s'il existe, sinon utiliser celui résolu
+        parent_id = node.parent_id
+        if parent_id is None:
+            parent_id = correct_parent_id
+        else:
+            # Vérifier que le parent_id fourni est correct
+            # Si le parent_id résolu est différent, utiliser celui résolu (plus fiable)
+            if correct_parent_id is not None and parent_id != correct_parent_id:
+                # Vérifier que le parent_id fourni existe vraiment
+                cursor_check = self.conn.execute("SELECT id FROM nodes WHERE id = ?", (parent_id,))
+                if not cursor_check.fetchone():
+                    # Le parent_id fourni n'existe pas, utiliser celui résolu
+                    parent_id = correct_parent_id
+                # Sinon, on garde le parent_id fourni (peut être valide si la hiérarchie est correcte)
+        
         cursor = self.conn.execute("""
             INSERT INTO nodes (parent_id, type, name, path, size, mtime, ctime, extension)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (node.parent_id, node.type.value, node.name, node.path, 
+        """, (parent_id, node.type.value, node.name, normalized_path, 
               node.size, node.mtime, node.ctime, node.extension))
         self.conn.commit()
         return cursor.lastrowid
     
     def update_node(self, node: Node) -> bool:
-        """Met à jour un nœud existant."""
+        """
+        Met à jour un nœud existant.
+        Met également à jour le parent_id si nécessaire (si le chemin a changé ou si parent_id est incorrect).
+        """
+        # Normaliser le chemin
+        normalized_path = self.normalize_path(node.path)
+        
+        # Résoudre le parent_id correct
+        correct_parent_id = self.resolve_parent_id(normalized_path)
+        
+        # Si le parent_id fourni est différent du parent_id résolu, utiliser le résolu
+        parent_id_to_use = node.parent_id
+        if correct_parent_id is not None:
+            parent_id_to_use = correct_parent_id
+        
         cursor = self.conn.execute("""
-            UPDATE nodes SET size = ?, mtime = ?, ctime = ?
+            UPDATE nodes SET parent_id = ?, size = ?, mtime = ?, ctime = ?
             WHERE path = ?
-        """, (node.size, node.mtime, node.ctime, node.path))
+        """, (parent_id_to_use, node.size, node.mtime, node.ctime, normalized_path))
         self.conn.commit()
         return cursor.rowcount > 0
     
     def get_node_by_path(self, path: str) -> Optional[Node]:
-        """Récupère un nœud par son chemin."""
+        """
+        Récupère un nœud par son chemin.
+        Essaie plusieurs variantes du chemin pour être robuste.
+        """
+        # Normaliser le chemin
+        normalized_path = self.normalize_path(path)
+        
+        # Essayer d'abord avec le chemin normalisé
         cursor = self.conn.execute("""
             SELECT id, parent_id, type, name, path, size, mtime, ctime, extension
             FROM nodes WHERE path = ?
-        """, (path,))
+        """, (normalized_path,))
         row = cursor.fetchone()
-        return Node.from_db_row(row) if row else None
+        if row:
+            return Node.from_db_row(row)
+        
+        # Si pas trouvé, essayer des variantes
+        variations = [path]  # Le chemin original
+        
+        if os.name == 'nt':
+            # Sur Windows, essayer avec/sans backslash final
+            if normalized_path.endswith('\\') and len(normalized_path) > 3:
+                variations.append(normalized_path.rstrip('\\'))
+            elif not normalized_path.endswith('\\'):
+                variations.append(normalized_path + '\\')
+            # Essayer aussi avec des slashes normaux
+            alt_path = normalized_path.replace('\\', '/')
+            variations.append(alt_path)
+            if alt_path.endswith('/'):
+                variations.append(alt_path.rstrip('/'))
+            else:
+                variations.append(alt_path + '/')
+        else:
+            # Sur Unix, essayer avec/sans slash final
+            if normalized_path.endswith('/') and normalized_path != '/':
+                variations.append(normalized_path.rstrip('/'))
+            elif not normalized_path.endswith('/'):
+                variations.append(normalized_path + '/')
+        
+        # Essayer toutes les variantes
+        for variant in variations:
+            if variant == normalized_path:
+                continue  # Déjà essayé
+            cursor = self.conn.execute("""
+                SELECT id, parent_id, type, name, path, size, mtime, ctime, extension
+                FROM nodes WHERE path = ?
+            """, (variant,))
+            row = cursor.fetchone()
+            if row:
+                return Node.from_db_row(row)
+        
+        return None
     
     def get_children(self, parent_id: int) -> List[Node]:
         """Récupère les enfants d'un nœud."""
@@ -164,10 +347,63 @@ class SQLiteService:
     
     def get_all_paths(self, parent_path: str) -> dict:
         """Récupère tous les chemins sous un parent avec leur ID."""
+        normalized_parent = self.normalize_path(parent_path)
+        # Utiliser LIKE avec escape pour éviter les problèmes avec les caractères spéciaux
+        # Sur Windows, échapper le backslash
+        if os.name == 'nt':
+            # Échapper les backslashes pour LIKE
+            escaped_parent = normalized_parent.replace('\\', '\\\\')
+            escaped_original = parent_path.replace('\\', '\\\\')
+        else:
+            escaped_parent = normalized_parent.replace('/', '//')
+            escaped_original = parent_path.replace('/', '//')
+        
         cursor = self.conn.execute("""
-            SELECT path, id FROM nodes WHERE path LIKE ?
-        """, (f"{parent_path}%",))
+            SELECT path, id FROM nodes WHERE path LIKE ? ESCAPE ? OR path LIKE ? ESCAPE ?
+        """, (f"{escaped_parent}%", '\\', f"{escaped_original}%", '\\'))
         return {row[0]: row[1] for row in cursor.fetchall()}
+    
+    def fix_hierarchy(self, root_path: Optional[str] = None) -> int:
+        """
+        Corrige les parent_id incorrects dans la base de données.
+        Parcourt tous les nœuds et met à jour leur parent_id en fonction de leur chemin.
+        
+        Args:
+            root_path: Chemin racine à partir duquel corriger (None = tout corriger)
+        
+        Returns:
+            Nombre de nœuds corrigés
+        """
+        fixed_count = 0
+        
+        # Récupérer tous les nœuds
+        if root_path:
+            normalized_root = self.normalize_path(root_path)
+            cursor = self.conn.execute("""
+                SELECT id, parent_id, type, name, path, size, mtime, ctime, extension
+                FROM nodes WHERE path LIKE ?
+            """, (f"{normalized_root}%",))
+        else:
+            cursor = self.conn.execute("""
+                SELECT id, parent_id, type, name, path, size, mtime, ctime, extension
+                FROM nodes
+            """)
+        
+        nodes = [Node.from_db_row(row) for row in cursor.fetchall()]
+        
+        for node in nodes:
+            # Résoudre le parent_id correct
+            correct_parent_id = self.resolve_parent_id(node.path)
+            
+            # Si le parent_id actuel est incorrect, le corriger
+            if node.parent_id != correct_parent_id:
+                cursor = self.conn.execute("""
+                    UPDATE nodes SET parent_id = ? WHERE id = ?
+                """, (correct_parent_id, node.id))
+                fixed_count += 1
+        
+        self.conn.commit()
+        return fixed_count
     
     def close(self):
         """Ferme la connexion."""

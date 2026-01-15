@@ -90,8 +90,34 @@ class SyncCoordinator:
         return self.sqlite.get_children(parent_id)
     
     def get_node_by_path(self, path: str) -> Optional[Node]:
-        """Récupère un nœud par son chemin."""
-        return self.sqlite.get_node_by_path(path)
+        """Récupère un nœud par son chemin (Robuste)."""
+        node = self.sqlite.get_node_by_path(path)
+        if node:
+            return node
+            
+        # Essayer des variantes (C: vs C:\) pour trouver la racine
+        import os
+        variations = []
+        if path.endswith(os.sep):
+            variations.append(path.rstrip(os.sep))
+        else:
+            variations.append(path + os.sep)
+            
+        if os.name == 'nt':
+            alt_sep = '/' if os.sep == '\\' else '\\'
+            path_alt = path.replace(os.sep, alt_sep)
+            variations.append(path_alt)
+            if path_alt.endswith(alt_sep):
+                 variations.append(path_alt.rstrip(alt_sep))
+            else:
+                 variations.append(path_alt + alt_sep)
+        
+        for v in variations:
+            node = self.sqlite.get_node_by_path(v)
+            if node:
+                return node
+                
+        return None
     
     def scan_disk(self, disk_path: str, progress_callback=None) -> None:
         """
@@ -105,19 +131,22 @@ class SyncCoordinator:
         self.scanner.progress_callback = progress_callback
         self.scanner.scanned_count = 0
         
+        # Normaliser le chemin du disque
+        normalized_disk_path = SQLiteService.normalize_path(disk_path)
+        
         # S'assurer que la racine existe dans la DB
         with self.lock:
-            root_node = self.sqlite.get_node_by_path(disk_path)
+            root_node = self.sqlite.get_node_by_path(normalized_disk_path)
             if not root_node:
                 # Créer le nœud racine s'il n'existe pas
                 try:
-                    stat = Path(disk_path).stat() if Path(disk_path).exists() else None
+                    stat = Path(normalized_disk_path).stat() if Path(normalized_disk_path).exists() else None
                     root_node = Node(
                         id=None,
                         parent_id=None,
                         type=NodeType.DIR,
-                        name=disk_path,
-                        path=disk_path,
+                        name=Path(normalized_disk_path).name or normalized_disk_path,
+                        path=normalized_disk_path,  # Utiliser le chemin normalisé
                         size=0,
                         mtime=stat.st_mtime if stat else 0,
                         ctime=stat.st_ctime if stat else 0,
@@ -128,10 +157,11 @@ class SyncCoordinator:
                     self.tantivy.add_document(root_node)
                     self.tantivy.commit()
                 except Exception as e:
-                    print(f"Erreur création racine {disk_path}: {e}")
+                    print(f"Erreur création racine {normalized_disk_path}: {e}")
         
         # Récupérer les chemins existants (avec IDs pour le liage parent-enfant)
-        existing_paths = self.sqlite.get_all_paths(disk_path)
+        # Utiliser le chemin normalisé
+        existing_paths = self.sqlite.get_all_paths(normalized_disk_path)
         
         # Callback d'insertion pour le scanner
         # Permet de récupérer l'ID immédiatement pour le passer aux enfants
@@ -154,9 +184,9 @@ class SyncCoordinator:
                 
                 return node_id
         
-        # Scanner le disque
+        # Scanner le disque (utiliser le chemin normalisé)
         # new_nodes est maintenant vide car traités par le callback
-        _, seen_paths = self.scanner.scan_disk_incremental(disk_path, existing_paths, node_callback=insert_node)
+        _, seen_paths = self.scanner.scan_disk_incremental(normalized_disk_path, existing_paths, node_callback=insert_node)
         
         # Flusher le reste du buffer Tantivy
         with self.lock:
@@ -170,9 +200,9 @@ class SyncCoordinator:
         
         # Supprimer les nœuds qui n'existent plus
         deleted_paths = set(existing_paths.keys()) - seen_paths
-        # Ne pas supprimer la racine
-        if disk_path in deleted_paths:
-            deleted_paths.remove(disk_path)
+        # Ne pas supprimer la racine (utiliser le chemin normalisé)
+        if normalized_disk_path in deleted_paths:
+            deleted_paths.remove(normalized_disk_path)
             
         if deleted_paths:
             with self.lock:
@@ -186,11 +216,11 @@ class SyncCoordinator:
     
                 self.tantivy.commit()
         
-        # Mettre à jour la taille du dossier racine
+        # Mettre à jour la taille du dossier racine (utiliser le chemin normalisé)
         with self.lock:
             try:
                 # Rafraîchir le nœud racine
-                root_node = self.sqlite.get_node_by_path(disk_path)
+                root_node = self.sqlite.get_node_by_path(normalized_disk_path)
                 if root_node and root_node.id:
                     total_size = self.sqlite.get_folder_size(root_node.id)
                     if total_size > 0:
@@ -230,6 +260,19 @@ class SyncCoordinator:
     def get_folder_size(self, node_id: int) -> int:
         """Calcule la taille d'un dossier."""
         return self.sqlite.get_folder_size(node_id)
+    
+    def fix_hierarchy(self, root_path: Optional[str] = None) -> int:
+        """
+        Corrige les parent_id incorrects dans la base de données.
+        
+        Args:
+            root_path: Chemin racine à partir duquel corriger (None = tout corriger)
+        
+        Returns:
+            Nombre de nœuds corrigés
+        """
+        with self.lock:
+            return self.sqlite.fix_hierarchy(root_path)
     
     def get_disk_usage(self, path: str) -> dict:
         """Récupère l'utilisation du disque (total, used, free)."""
