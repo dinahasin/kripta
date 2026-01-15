@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QScrollArea, QFrame, QMessageBox, QGridLayout
+    QScrollArea, QFrame, QMessageBox, QGridLayout, QProgressBar,
+    QMenu, QComboBox
 )
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QFont, QColor
+from PySide6.QtGui import QAction, QFont, QColor
 
 from ..drive_service import DriveService, DriveInfo
 
@@ -59,6 +60,37 @@ class DriveWidget(QFrame):
         else:
             details += " • Non monté"
             
+        # Stats d'usage (Barre de progression)
+        if self.drive.is_mounted and self.drive.total_size > 0:
+            details += f" • {self.drive.free_size // (1024**3)} Go libres sur {self.drive.total_size // (1024**3)} Go"
+            
+            # Progress Bar compacte
+            progress = QProgressBar()
+            progress.setMaximumHeight(8)
+            progress.setTextVisible(False)
+            progress.setValue(int(self.drive.percent))
+            
+            # Couleur selon remplissage
+            if self.drive.percent > 90:
+                color = "#e74c3c" # Rouge
+            elif self.drive.percent > 75:
+                color = "#f39c12" # Orange
+            else:
+                color = "#2ecc71" # Vert
+                
+            progress.setStyleSheet(f"""
+                QProgressBar {{
+                    border: none;
+                    background-color: #ecf0f1;
+                    border-radius: 4px;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {color};
+                    border-radius: 4px;
+                }}
+            """)
+            info_layout.addWidget(progress)
+
         details_label = QLabel(details)
         details_label.setStyleSheet("color: #7f8c8d; font-size: 12px;")
         info_layout.addWidget(details_label)
@@ -71,7 +103,7 @@ class DriveWidget(QFrame):
         
         # Bouton Scan (seulement si monté)
         if self.drive.is_mounted:
-            btn_scan = QPushButton("🔍 Analyser")
+            btn_scan = QPushButton("🔍 Options")
             btn_scan.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_scan.setStyleSheet("""
                 QPushButton {
@@ -86,7 +118,15 @@ class DriveWidget(QFrame):
                     background-color: #bdc3c7;
                 }
             """)
-            btn_scan.clicked.connect(lambda: self.scan_requested.emit(self.drive.mountpoint))
+            
+            # Menu déroulant pour le scan
+            menu = QMenu(self)
+            
+            action_scan = QAction("🔍 Lancer le scan", self)
+            action_scan.triggered.connect(lambda: self.scan_requested.emit(self.drive.mountpoint))
+            menu.addAction(action_scan)
+            
+            btn_scan.setMenu(menu)
             btn_layout.addWidget(btn_scan)
         
         # Bouton Mount/Unmount
@@ -172,6 +212,7 @@ class DriveManagerWidget(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.sort_mode = "Disques Montés" # Default sort: Mounted first
         self.setup_ui()
         self.refresh_drives()
         
@@ -189,7 +230,16 @@ class DriveManagerWidget(QWidget):
         lbl_title = QLabel("Gestion des Disques")
         lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
         header_layout.addWidget(lbl_title)
+        
         header_layout.addStretch()
+        
+        # Options de tri
+        lbl_sort = QLabel("Trier par:")
+        self.combo_sort = QComboBox()
+        self.combo_sort.addItems(["Disques Montés", "Nom (A-Z)", "Taille (Croissant)", "Espace Libre (Croissant)"])
+        self.combo_sort.currentTextChanged.connect(self.on_sort_changed)
+        header_layout.addWidget(lbl_sort)
+        header_layout.addWidget(self.combo_sort)
         
         btn_refresh = QPushButton("🔄 Actualiser")
         btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -212,6 +262,10 @@ class DriveManagerWidget(QWidget):
         self.scroll.setWidget(self.scroll_content)
         layout.addWidget(self.scroll)
 
+    def on_sort_changed(self, text):
+        self.sort_mode = text
+        self.refresh_drives()
+
     def refresh_drives(self):
         """Met à jour la liste des disques."""
         drives = DriveService.get_drives()
@@ -224,33 +278,26 @@ class DriveManagerWidget(QWidget):
             lbl_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_empty.setStyleSheet("color: #7f8c8d; font-size: 14px; margin-top: 50px;")
             self.drives_layout.addWidget(lbl_empty)
+            return
+
+        # Tri
+        if self.sort_mode == "Disques Montés":
+            # Montés d'abord
+            drives.sort(key=lambda x: (not x.is_mounted, x.name))
+        elif self.sort_mode == "Nom (A-Z)":
+            drives.sort(key=lambda x: x.name)
+        elif self.sort_mode == "Taille (Croissant)":
+            # Note: size est str, idéalement faudrait avoir les bytes bruts, mais on a total_size
+            drives.sort(key=lambda x: x.total_size)
+        elif self.sort_mode == "Espace Libre (Croissant)":
+            drives.sort(key=lambda x: x.free_size)
         
-        # Séparer les disques pour l'affichage (système vs amovibles/autres)
-        system_drives = [d for d in drives if d.is_system]
-        other_drives = [d for d in drives if not d.is_system]
-        
-        # Afficher les autres disques en premier (plus utile pour l'utilisateur)
-        if other_drives:
-            lbl_removable = QLabel("Disques Externes / Données")
-            lbl_removable.setStyleSheet("font-weight: bold; color: #7f8c8d; margin-top: 10px; margin-bottom: 5px;")
-            self.drives_layout.addWidget(lbl_removable)
-            
-            for drive in other_drives:
-                widget = DriveWidget(drive, self)
-                widget.scan_requested.connect(self.scan_requested_from_manager.emit)
-                widget.status_changed.connect(self.refresh_drives)
-                self.drives_layout.addWidget(widget)
-                
-        if system_drives:
-            lbl_sys = QLabel("Disques Système")
-            lbl_sys.setStyleSheet("font-weight: bold; color: #7f8c8d; margin-top: 20px; margin-bottom: 5px;")
-            self.drives_layout.addWidget(lbl_sys)
-            
-            for drive in system_drives:
-                widget = DriveWidget(drive, self)
-                widget.scan_requested.connect(self.scan_requested_from_manager.emit)
-                widget.status_changed.connect(self.refresh_drives)
-                self.drives_layout.addWidget(widget)
+        # Affichage
+        for drive in drives:
+            widget = DriveWidget(drive, self)
+            widget.scan_requested.connect(self.scan_requested_from_manager.emit)
+            widget.status_changed.connect(self.refresh_drives)
+            self.drives_layout.addWidget(widget)
                 
         self.drives_layout.addStretch()
 

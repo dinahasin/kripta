@@ -3,17 +3,23 @@ import subprocess
 from dataclasses import dataclass
 from typing import List, Optional
 import logging
+import shutil
 
 @dataclass
 class DriveInfo:
     device: str          # /dev/sdb1
     name: str            # Label or model
-    size: str            # Human readable size
+    size: str            # Human readable size (capacity from lsblk)
     mountpoint: str      # /media/user/usb or empty
     type: str            # ext4, ntfs, etc.
     is_mounted: bool
     is_removable: bool
     is_system: bool      # True if it's the root drive or swap
+    # New fields for usage stats
+    total_size: int = 0
+    used_size: int = 0
+    free_size: int = 0
+    percent: float = 0.0
 
 class DriveService:
     """
@@ -61,6 +67,22 @@ class DriveService:
         model = device.get("model")
         name = label if label else (model if model else device.get("name"))
         
+        # Stats d'usage
+        total = 0
+        used = 0
+        free = 0
+        percent = 0.0
+        
+        if mountpoint:
+            try:
+                usage = shutil.disk_usage(mountpoint)
+                total = usage.total
+                used = usage.used
+                free = usage.free
+                percent = (used / total) * 100 if total > 0 else 0
+            except Exception:
+                pass
+        
         # Créer l'objet DriveInfo si c'est pertinent
         # pertinent = (est une partition OU est un disque simple) ET a un système de fichiers ou est monté
         if (dev_type == "part" or (dev_type == "disk" and fstype)) and device.get("name"):
@@ -72,7 +94,11 @@ class DriveService:
                 type=fstype or "Inconnu",
                 is_mounted=bool(mountpoint),
                 is_removable=device.get("rm") == True or device.get("hotplug") == True,
-                is_system=is_system
+                is_system=is_system,
+                total_size=total,
+                used_size=used,
+                free_size=free,
+                percent=percent
             )
             drives.append(drive)
             

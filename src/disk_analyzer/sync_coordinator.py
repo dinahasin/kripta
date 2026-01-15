@@ -113,6 +113,9 @@ class SyncCoordinator:
         # Scanner le disque
         new_nodes, seen_paths = self.scanner.scan_disk_incremental(disk_path, existing_paths)
         
+        if self.scanner._stop_requested:
+            return
+
         # Ajouter les nouveaux nœuds
         batch_size = 1000
         for i in range(0, len(new_nodes), batch_size):
@@ -136,6 +139,10 @@ class SyncCoordinator:
                 
                 self.tantivy.commit()
     
+    def stop_scan(self):
+        """Arrête le scan en cours."""
+        self.scanner.stop()
+
     def scan_disk_async(self, disk_path: str, progress_callback=None, completion_callback=None):
         """Scanne un disque de manière asynchrone."""
         def scan_thread():

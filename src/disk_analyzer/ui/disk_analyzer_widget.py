@@ -5,7 +5,7 @@ Disk Analyzer Widget - UI for space optimization.
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QTreeWidget, QTreeWidgetItem, QComboBox,
                                QProgressBar, QMessageBox, QSplitter, QTabWidget, QTextEdit)
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QFont, QMovie
 from pathlib import Path
 from ..sync_coordinator import SyncCoordinator
@@ -24,6 +24,10 @@ class ScanThread(QThread):
         super().__init__()
         self.coordinator = coordinator
         self.disk_path = disk_path
+        
+    def stop(self):
+        self.coordinator.stop_scan()
+        self.wait()
     
     def run(self):
         try:
@@ -227,7 +231,94 @@ class DiskAnalysisPage(QWidget):
         self.scan_thread.progress.connect(self.on_scan_progress)
         self.scan_thread.finished.connect(self.on_scan_finished)
         self.scan_thread.start()
-    
+        
+        # Timer pour mise à jour incrémentale de l'arborescence (chaque 1s)
+        self.incremental_timer = QTimer(self)
+        self.incremental_timer.timeout.connect(self.update_tree_incremental)
+        self.incremental_timer.start(1000)
+
+    def update_tree_incremental(self):
+        """Met à jour l'arbre de manière incrémentale (racine + nœuds étendus)."""
+        try:
+            # Mise à jour de la racine
+            self._update_item_children(None)
+            
+            # Mise à jour récursive des items étendus
+            self._update_expanded_items(self.tree.invisibleRootItem())
+            
+        except Exception as e:
+            pass # Éviter de crasher le timer
+
+    def _update_expanded_items(self, parent_item: QTreeWidgetItem):
+        """Parcourt récursivement les items étendus pour mettre à jour leurs enfants."""
+        count = parent_item.childCount()
+        for i in range(count):
+            item = parent_item.child(i)
+            # Si l'item est étendu, on met à jour ses enfants
+            if item.isExpanded():
+                node = item.data(0, Qt.ItemDataRole.UserRole)
+                if node and node.type.name == "DIR":
+                    self._update_item_children(item)
+                    self._update_expanded_items(item)
+
+    def _update_item_children(self, parent_item: QTreeWidgetItem | None):
+        """Synchronise les enfants d'un item avec la DB."""
+        parent_id = None
+        if parent_item:
+            node = parent_item.data(0, Qt.ItemDataRole.UserRole)
+            parent_id = node.id if node else None
+            
+        # Récupérer les enfants depuis la DB
+        try:
+            db_children = self.coordinator.get_children(parent_id)
+        except:
+            return
+
+        # Map des items existants
+        existing_items = {}
+        if parent_item:
+            count = parent_item.childCount()
+            for i in range(count):
+                child = parent_item.child(i)
+                node_data = child.data(0, Qt.ItemDataRole.UserRole)
+                if node_data:
+                    existing_items[node_data.path] = child
+        else:
+            count = self.tree.topLevelItemCount()
+            for i in range(count):
+                child = self.tree.topLevelItem(i)
+                node_data = child.data(0, Qt.ItemDataRole.UserRole)
+                if node_data:
+                    existing_items[node_data.path] = child
+        
+        # Mettre à jour ou ajouter
+        for node in db_children:
+            text_size = self.format_size(node.size)
+            
+            if node.path in existing_items:
+                # Update taille seulement si changé
+                item = existing_items[node.path]
+                if item.text(1) != text_size:
+                    item.setText(1, text_size)
+            else:
+                # Nouvel item
+                if parent_item:
+                    item = QTreeWidgetItem(parent_item)
+                else:
+                    item = QTreeWidgetItem(self.tree)
+                
+                item.setText(0, node.name)
+                item.setText(1, text_size)
+                item.setText(2, node.type.name)
+                item.setData(0, Qt.ItemDataRole.UserRole, node)
+                
+                # Icône (simple texte pour l'instant ou standard)
+                # item.setIcon(0, ...) 
+                
+                # Ajouter dummy si dossier pour permettre l'expansion
+                if node.type.name == "DIR":
+                    QTreeWidgetItem(item)
+
     def on_scan_progress(self, current, total, filename):
         """Met à jour la barre de progression."""
         if total > 0:
@@ -240,7 +331,10 @@ class DiskAnalysisPage(QWidget):
         self.btn_scan.setEnabled(True)
         self.progress_bar.setVisible(False)
         
-        # Arrêter le GIF
+        # Arrêter le GIF et le timer
+        if hasattr(self, 'incremental_timer'):
+            self.incremental_timer.stop()
+            
         self.loading_movie.stop()
         self.lbl_loading_gif.setVisible(False)
         self.lbl_status.setText("")
@@ -370,6 +464,8 @@ class DiskAnalysisPage(QWidget):
         return f"{size:.1f} Po"
     
     def closeEvent(self, event):
+        if self.scan_thread and self.scan_thread.isRunning():
+            self.scan_thread.stop()
         self.coordinator.close()
         super().closeEvent(event)
 
