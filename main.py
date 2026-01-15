@@ -148,6 +148,20 @@ def main():
     # Variables pour stocker l'état de sécurité
     master_password = None
     
+    # 0. Afficher le Splash Screen
+    # Dans une version idéale, on ferait le chargement lourd ici
+    # Pour l'instant, c'est cosmétique
+    from src.ui.splash_screen import SplashScreen
+    from PySide6.QtCore import QEventLoop
+    
+    splash = SplashScreen()
+    splash.show()
+    
+    # Créer une boucle locale pour attendre la fin du splash
+    loop = QEventLoop()
+    splash.finished.connect(loop.quit)
+    loop.exec()
+    
     # 1. Vérifier/Initialiser le profil de sécurité
     if not is_security_profile_initialized():
         # Cas A: Première exécution
@@ -179,6 +193,10 @@ def main():
         # Cas B: Login normal
         from src.ui.dialogs.login_dialog import LoginDialog
         dialog = LoginDialog()
+        
+        # On peut fermer le splash avant ou après le login, ici on le ferme avant pour que le dialog soit visible
+        # Note: le splash s'est fermé tout seul via finished -> close()
+        
         if dialog.exec() != dialog.DialogCode.Accepted:
             sys.exit(1)
         master_password = dialog.get_password()

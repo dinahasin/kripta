@@ -11,6 +11,7 @@ class DriveWidget(QFrame):
     """Widget représentant un seul disque/partition."""
     
     scan_requested = Signal(str)  # Signal émis quand on clique sur "Scanner"
+    status_changed = Signal()     # Signal émis quand un refresh est nécessaire
     
     def __init__(self, drive: DriveInfo, parent=None):
         super().__init__(parent)
@@ -146,20 +147,20 @@ class DriveWidget(QFrame):
 
     def mount(self):
         if DriveService.mount_drive(self.drive.device):
-            self.parent().refresh_drives()  # type: ignore
+            self.status_changed.emit()
         else:
             QMessageBox.warning(self, "Erreur", f"Impossible de monter {self.drive.device}")
 
     def unmount(self):
         if DriveService.unmount_drive(self.drive.device):
-            self.parent().refresh_drives()  # type: ignore
+            self.status_changed.emit()
         else:
             QMessageBox.warning(self, "Erreur", f"Impossible de démonter {self.drive.device}")
 
     def power_off(self):
         if DriveService.power_off_drive(self.drive.device):
             QMessageBox.information(self, "Succès", "Vous pouvez retirer le périphérique en toute sécurité.")
-            self.parent().refresh_drives()  # type: ignore
+            self.status_changed.emit()
         else:
             QMessageBox.warning(self, "Erreur", f"Impossible d'éjecter {self.drive.device}")
 
@@ -237,6 +238,7 @@ class DriveManagerWidget(QWidget):
             for drive in other_drives:
                 widget = DriveWidget(drive, self)
                 widget.scan_requested.connect(self.scan_requested_from_manager.emit)
+                widget.status_changed.connect(self.refresh_drives)
                 self.drives_layout.addWidget(widget)
                 
         if system_drives:
@@ -247,6 +249,7 @@ class DriveManagerWidget(QWidget):
             for drive in system_drives:
                 widget = DriveWidget(drive, self)
                 widget.scan_requested.connect(self.scan_requested_from_manager.emit)
+                widget.status_changed.connect(self.refresh_drives)
                 self.drives_layout.addWidget(widget)
                 
         self.drives_layout.addStretch()

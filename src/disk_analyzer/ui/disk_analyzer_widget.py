@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QPushButton, QTreeWidget, QTreeWidgetItem, QComboBox,
                                QProgressBar, QMessageBox, QSplitter, QTabWidget, QTextEdit)
 from PySide6.QtCore import Qt, Signal, QThread
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QMovie
 from pathlib import Path
 from ..sync_coordinator import SyncCoordinator
 from ..scanner import DiskScanner
@@ -17,7 +17,7 @@ from .drive_manager_widget import DriveManagerWidget
 
 class ScanThread(QThread):
     """Thread pour scanner un disque sans bloquer l'UI."""
-    progress = Signal(int, int)
+    progress = Signal(int, int, str)
     finished = Signal(bool, str)
     
     def __init__(self, coordinator: SyncCoordinator, disk_path: str):
@@ -27,8 +27,8 @@ class ScanThread(QThread):
     
     def run(self):
         try:
-            def progress_callback(current, total):
-                self.progress.emit(current, total)
+            def progress_callback(current, total, filename):
+                self.progress.emit(current, total, filename)
             
             self.coordinator.scan_disk(self.disk_path, progress_callback)
             self.finished.emit(True, "Scan terminé avec succès")
@@ -103,6 +103,24 @@ class DiskAnalysisPage(QWidget):
         toolbar_layout.addWidget(self.btn_search)
         
         layout.addWidget(toolbar)
+        
+        # Loading area
+        self.loading_container = QWidget()
+        loading_layout = QHBoxLayout(self.loading_container)
+        loading_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.lbl_loading_gif = QLabel()
+        self.loading_movie = QMovie("assets/loading.gif")
+        self.loading_movie.setScaledSize(self.lbl_loading_gif.sizeHint())
+        self.lbl_loading_gif.setMovie(self.loading_movie)
+        self.lbl_loading_gif.setVisible(False)
+        loading_layout.addWidget(self.lbl_loading_gif)
+        
+        self.lbl_status = QLabel("")
+        self.lbl_status.setStyleSheet("color: #7f8c8d; font-style: italic;")
+        loading_layout.addWidget(self.lbl_status, 1)
+        
+        layout.addWidget(self.loading_container)
         
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -199,22 +217,33 @@ class DiskAnalysisPage(QWidget):
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
         
+        # Activer le GIF et status
+        self.lbl_loading_gif.setVisible(True)
+        self.loading_movie.start()
+        self.lbl_status.setText("Démarrage du scan...")
+        
         # Lancer le scan dans un thread
         self.scan_thread = ScanThread(self.coordinator, disk)
         self.scan_thread.progress.connect(self.on_scan_progress)
         self.scan_thread.finished.connect(self.on_scan_finished)
         self.scan_thread.start()
     
-    def on_scan_progress(self, current, total):
+    def on_scan_progress(self, current, total, filename):
         """Met à jour la barre de progression."""
         if total > 0:
             progress = int((current / total) * 100)
             self.progress_bar.setValue(progress)
+        self.lbl_status.setText(f"Scan: {filename}")
     
     def on_scan_finished(self, success, message):
         """Appelé quand le scan est terminé."""
         self.btn_scan.setEnabled(True)
         self.progress_bar.setVisible(False)
+        
+        # Arrêter le GIF
+        self.loading_movie.stop()
+        self.lbl_loading_gif.setVisible(False)
+        self.lbl_status.setText("")
         
         if success:
             # QMessageBox.information(self, "Succès", f"✓ {message}") # Trop intrusif

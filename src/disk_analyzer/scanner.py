@@ -13,7 +13,7 @@ import string
 class DiskScanner:
     """Scanner de système de fichiers avec mise à jour incrémentale."""
     
-    def __init__(self, progress_callback: Optional[Callable[[int, int], None]] = None):
+    def __init__(self, progress_callback: Optional[Callable[[int, int, str], None]] = None):
         self.progress_callback = progress_callback
         self.scanned_count = 0
         self.total_estimate = 0
@@ -85,7 +85,7 @@ class DiskScanner:
                     
                     # Callback de progression
                     if self.progress_callback and self.scanned_count % 100 == 0:
-                        self.progress_callback(self.scanned_count, self.total_estimate)
+                        self.progress_callback(self.scanned_count, self.total_estimate, entry.path)
                     
                 except (PermissionError, OSError) as e:
                     # Ignorer les fichiers/dossiers inaccessibles
@@ -159,7 +159,7 @@ class DiskScanner:
                         
                         self.scanned_count += 1
                         if self.progress_callback and self.scanned_count % 100 == 0:
-                            self.progress_callback(self.scanned_count, self.total_estimate)
+                            self.progress_callback(self.scanned_count, self.total_estimate, entry.path)
                     
                     except (PermissionError, OSError):
                         continue
