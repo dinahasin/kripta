@@ -3,4 +3,4 @@ pywin32>=306
 cryptography>=43.0.0
 protobuf>=5.28.0
 python-dotenv>=1.0.0
-
+tantivy>=0.22.0

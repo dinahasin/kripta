@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         
         # Référence pour les vues
         self.password_manager_view = None
+        self.disk_analyzer_view = None
         
         # Initialisation de l'interface
         self._setup_ui()
@@ -57,7 +58,7 @@ class MainWindow(QMainWindow):
         # Connexion des boutons aux signaux
         self.ui.btn_password_manager.clicked.connect(self._open_password_manager)
         self.ui.btn_file_encryptor.clicked.connect(self._show_coming_soon)
-        self.ui.btn_disk_analyzer.clicked.connect(self._show_coming_soon)
+        self.ui.btn_disk_analyzer.clicked.connect(self._open_disk_analyzer)
 
     def _setup_menu(self):
         """Configure le menu avec les raccourcis vers les fonctionnalités."""
@@ -110,6 +111,18 @@ class MainWindow(QMainWindow):
         
         self.stacked_widget.setCurrentWidget(self.password_manager_view)
         self.setWindowTitle("Kripta - Gestionnaire de Mots de Passe")
+    
+    def _open_disk_analyzer(self):
+        """Ouvre l'analyseur de disque dans la fenêtre principale."""
+        if self.disk_analyzer_view is None:
+            from src.disk_analyzer.ui import DiskAnalyzerWidget
+            
+            self.disk_analyzer_view = DiskAnalyzerWidget(self)
+            self.disk_analyzer_view.back_requested.connect(self._show_home)
+            self.stacked_widget.addWidget(self.disk_analyzer_view)
+        
+        self.stacked_widget.setCurrentWidget(self.disk_analyzer_view)
+        self.setWindowTitle("Kripta - Analyseur d'Espace Disque")
     
     def _show_home(self):
         """Retourne à la page d'accueil."""

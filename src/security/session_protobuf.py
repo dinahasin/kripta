@@ -70,13 +70,13 @@ def serialize_session(session: SessionData) -> bytes:
 
     Format :
       - len(session_id) (uint16 big-endian) + session_id utf-8
-      - len(username)   (uint16) + username utf-8
-      - len(windows_user) (uint16) + windows_user utf-8
-      - created_at (int64)
-      - last_seen_at (int64)
-      - expires_at (int64)
-      - is_authenticated (bool, 1 octet)
-      - persistent (bool, 1 octet)
+      - len(username)   (uint16 big-endian) + username utf-8
+      - len(windows_user) (uint16 big-endian) + windows_user utf-8
+      - created_at (int64 big-endian)
+      - last_seen_at (int64 big-endian)
+      - expires_at (int64 big-endian)
+      - is_authenticated (bool, 1 octet big-endian)
+      - persistent (bool, 1 octet big-endian)
     """
     sid_bytes = session.session_id.encode("utf-8")
     user_bytes = session.username.encode("utf-8")
@@ -103,13 +103,21 @@ def deserialize_session(data: bytes) -> Optional[SessionData]:
     Désérialise un bloc binaire en SessionData.
     Retourne None si les données sont invalides.
     """
+    if not data:
+        return None
+    
     try:
         offset = 0
+        data_len = len(data)
 
         def read_str() -> str:
             nonlocal offset
+            if offset + 2 > data_len:
+                raise ValueError("Données insuffisantes pour lire la longueur")
             (length,) = struct.unpack(">H", data[offset : offset + 2])
             offset += 2
+            if offset + length > data_len:
+                raise ValueError("Données insuffisantes pour lire la chaîne")
             s = data[offset : offset + length].decode("utf-8")
             offset += length
             return s
@@ -118,15 +126,28 @@ def deserialize_session(data: bytes) -> Optional[SessionData]:
         username = read_str()
         windows_user = read_str()
 
+        if offset + 8 > data_len:
+            raise ValueError("Données insuffisantes pour created_at")
         created_at = struct.unpack(">q", data[offset : offset + 8])[0]
         offset += 8
+        
+        if offset + 8 > data_len:
+            raise ValueError("Données insuffisantes pour last_seen_at")
         last_seen_at = struct.unpack(">q", data[offset : offset + 8])[0]
         offset += 8
+        
+        if offset + 8 > data_len:
+            raise ValueError("Données insuffisantes pour expires_at")
         expires_at = struct.unpack(">q", data[offset : offset + 8])[0]
         offset += 8
 
+        if offset + 1 > data_len:
+            raise ValueError("Données insuffisantes pour is_authenticated")
         is_authenticated = struct.unpack(">?", data[offset : offset + 1])[0]
         offset += 1
+        
+        if offset + 1 > data_len:
+            raise ValueError("Données insuffisantes pour persistent")
         persistent = struct.unpack(">?", data[offset : offset + 1])[0]
         offset += 1
 
@@ -140,6 +161,6 @@ def deserialize_session(data: bytes) -> Optional[SessionData]:
             is_authenticated=is_authenticated,
             persistent=persistent,
         )
-    except Exception:
+    except (ValueError, struct.error, UnicodeDecodeError, IndexError):
         return None
 
