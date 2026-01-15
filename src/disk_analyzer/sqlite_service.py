@@ -162,12 +162,12 @@ class SQLiteService:
         result = cursor.fetchone()
         return result[0] if result and result[0] else 0
     
-    def get_all_paths(self, parent_path: str) -> set:
-        """Récupère tous les chemins sous un parent (pour détecter les suppressions)."""
+    def get_all_paths(self, parent_path: str) -> dict:
+        """Récupère tous les chemins sous un parent avec leur ID."""
         cursor = self.conn.execute("""
-            SELECT path FROM nodes WHERE path LIKE ?
+            SELECT path, id FROM nodes WHERE path LIKE ?
         """, (f"{parent_path}%",))
-        return {row[0] for row in cursor.fetchall()}
+        return {row[0]: row[1] for row in cursor.fetchall()}
     
     def close(self):
         """Ferme la connexion."""

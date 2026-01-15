@@ -30,9 +30,8 @@ class SyncCoordinator:
             node_id = self.sqlite.add_node(node)
             node.id = node_id
             
-            # Ajouter dans Tantivy
+            # Ajouter dans Tantivy (commit sera fait par batch)
             self.tantivy.add_document(node)
-            self.tantivy.commit()
             
             return node_id
     
@@ -43,9 +42,8 @@ class SyncCoordinator:
             success = self.sqlite.update_node(node)
             
             if success:
-                # Mettre à jour Tantivy
+                # Mettre à jour Tantivy (commit sera fait par batch)
                 self.tantivy.update_document(node)
-                self.tantivy.commit()
             
             return success
     
@@ -56,9 +54,8 @@ class SyncCoordinator:
             success = self.sqlite.delete_node(path)
             
             if success:
-                # Supprimer de Tantivy
+                # Supprimer de Tantivy (commit sera fait par batch)
                 self.tantivy.delete_document(path)
-                self.tantivy.commit()
             
             return success
     
@@ -104,33 +101,93 @@ class SyncCoordinator:
             disk_path: Chemin du disque à scanner
             progress_callback: Fonction de callback pour la progression
         """
+
         self.scanner.progress_callback = progress_callback
         self.scanner.scanned_count = 0
         
-        # Récupérer les chemins existants
+        # S'assurer que la racine existe dans la DB
+        with self.lock:
+            root_node = self.sqlite.get_node_by_path(disk_path)
+            if not root_node:
+                # Créer le nœud racine s'il n'existe pas
+                try:
+                    stat = Path(disk_path).stat() if Path(disk_path).exists() else None
+                    root_node = Node(
+                        id=None,
+                        parent_id=None,
+                        type=NodeType.DIR,
+                        name=disk_path,
+                        path=disk_path,
+                        size=0,
+                        mtime=stat.st_mtime if stat else 0,
+                        ctime=stat.st_ctime if stat else 0,
+                        extension=None
+                    )
+                    node_id = self.sqlite.add_node(root_node)
+                    root_node.id = node_id
+                    self.tantivy.add_document(root_node)
+                    self.tantivy.commit()
+                except Exception as e:
+                    print(f"Erreur création racine {disk_path}: {e}")
+        
+        # Récupérer les chemins existants (avec IDs pour le liage parent-enfant)
         existing_paths = self.sqlite.get_all_paths(disk_path)
         
-        # Scanner le disque
-        new_nodes, seen_paths = self.scanner.scan_disk_incremental(disk_path, existing_paths)
+        # Callback d'insertion pour le scanner
+        # Permet de récupérer l'ID immédiatement pour le passer aux enfants
+        documents_buffer = []
+        BATCH_SIZE = 1000
         
+        def insert_node(node: Node) -> int:
+            with self.lock:
+                # SQLite (Insertion immédiate pour l'ID)
+                node_id = self.sqlite.add_node(node)
+                node.id = node_id
+                
+                # Tantivy (Batch)
+                documents_buffer.append(node)
+                if len(documents_buffer) >= BATCH_SIZE:
+                    for doc in documents_buffer:
+                        self.tantivy.add_document(doc)
+                    documents_buffer.clear()
+                    self.tantivy.commit()
+                
+                return node_id
+        
+        # Scanner le disque
+        # new_nodes est maintenant vide car traités par le callback
+        _, seen_paths = self.scanner.scan_disk_incremental(disk_path, existing_paths, node_callback=insert_node)
+        
+        # Flusher le reste du buffer Tantivy
+        with self.lock:
+            if documents_buffer:
+                for doc in documents_buffer:
+                    self.tantivy.add_document(doc)
+                self.tantivy.commit()
+                
         if self.scanner._stop_requested:
             return
-
-        # Ajouter les nouveaux nœuds
-        batch_size = 1000
-        for i in range(0, len(new_nodes), batch_size):
-            batch = new_nodes[i:i+batch_size]
+        
+        # Supprimer les nœuds qui n'existent plus
+        deleted_paths = set(existing_paths.keys()) - seen_paths
+        # Ne pas supprimer la racine
+        if disk_path in deleted_paths:
+            deleted_paths.remove(disk_path)
             
+        if deleted_paths:
             with self.lock:
-                for node in batch:
-                    node_id = self.sqlite.add_node(node)
-                    node.id = node_id
-                    self.tantivy.add_document(node)
+                for path in deleted_paths:
+                    self.sqlite.delete_node(path)
+                    self.tantivy.delete_document(path)
                 
                 self.tantivy.commit()
         
         # Supprimer les nœuds qui n'existent plus
         deleted_paths = existing_paths - seen_paths
+        # Ne pas supprimer la racine si elle n'a pas été vue (cas du scanner qui liste les enfants)
+        if disk_path in deleted_paths:
+            deleted_paths.remove(disk_path)
+            
         if deleted_paths:
             with self.lock:
                 for path in deleted_paths:
@@ -169,6 +226,30 @@ class SyncCoordinator:
         """Calcule la taille d'un dossier."""
         return self.sqlite.get_folder_size(node_id)
     
+    def get_disk_usage(self, path: str) -> dict:
+        """Récupère l'utilisation du disque (total, used, free)."""
+        import shutil
+        try:
+            # Sur Windows, s'assurer que le chemin est une racine de disque valide (ex: "C:\\")
+            if ":" in path and len(path) <= 3:
+                if not path.endswith("\\"):
+                    path += "\\"
+                    
+            usage = shutil.disk_usage(path)
+            total = usage.total
+            used = usage.used
+            free = usage.free
+            percent = (used / total) * 100 if total > 0 else 0
+            
+            return {
+                "total": total,
+                "used": used,
+                "free": free,
+                "percent": percent
+            }
+        except Exception:
+            return {"total": 0, "used": 0, "free": 0, "percent": 0}
+
     def close(self):
         """Ferme les connexions."""
         self.sqlite.close()

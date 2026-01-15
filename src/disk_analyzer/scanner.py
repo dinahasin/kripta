@@ -145,21 +145,17 @@ class DiskScanner:
         # Multiplier par un facteur pour estimer le total
         return count * (10 if max_depth < 5 else 1)
     
-    def scan_disk_incremental(self, disk_path: str, existing_paths: Set[str]) -> tuple[List[Node], Set[str]]:
+    def scan_disk_incremental(self, disk_path: str, existing_paths: Dict[str, int], node_callback=None) -> tuple[List[Node], Set[str]]:
         """
         Scanne un disque de manière incrémentale.
-        
-        Args:
-            disk_path: Chemin du disque à scanner
-            existing_paths: Ensemble des chemins déjà en base
-        
-        Returns:
-            (nouveaux/modifiés nœuds, chemins vus)
+        Returns: (nouveaux nodes - vide car traités par callback, chemins vus)
         """
-        nodes_to_process = []
         seen_paths = set()
         
-        def scan_recursive(path: str, parent_id: Optional[int] = None):
+        # Le root parent_id doit être trouvé dans existing_paths ou via le callback
+        root_id = existing_paths.get(disk_path)
+        
+        def scan_recursive(path: str, parent_id: Optional[int]):
             if self._stop_requested:
                 return
 
@@ -176,10 +172,12 @@ class DiskScanner:
                         seen_paths.add(entry_path)
                         
                         # Vérifier si le fichier existe déjà
-                        is_new = entry_path not in existing_paths
+                        # existing_paths est maintenant Dict[path, id]
+                        existing_id = existing_paths.get(entry_path)
+                        is_new = existing_id is None
                         
                         node = Node(
-                            id=None,
+                            id=existing_id, # Peut être None si nouveau
                             parent_id=parent_id,
                             type=NodeType.DIR if entry.is_dir() else NodeType.FILE,
                             name=entry.name,
@@ -190,12 +188,25 @@ class DiskScanner:
                             extension=Path(entry.name).suffix.lower() if entry.is_file() else None
                         )
                         
-                        if is_new:
-                            nodes_to_process.append(node)
+                        current_id = existing_id
                         
-                        # Scanner récursivement les dossiers
+                        if is_new:
+                            # Si callback fourni, on insère tout de suite pour avoir l'ID
+                            if node_callback:
+                                current_id = node_callback(node)
+                                node.id = current_id
+                                # On met à jour le dict local pour les futurs enfants
+                                existing_paths[entry_path] = current_id
+                        elif node_callback:
+                            # Optionnel: notifier mise à jour (taille/date)
+                            # Pour l'instant on suppose que update est géré ailleurs ou pas nécessaire pour l'ID
+                            pass
+                        
+                        # Scanner récursivement les dossiers avec le bon parent_id
                         if entry.is_dir():
-                            scan_recursive(entry_path, None)  # parent_id sera défini après insertion
+                            # Si on n'a pas d'ID (ex: erreur insert), on ne peut pas lier les enfants
+                            if current_id is not None:
+                                scan_recursive(entry_path, current_id)
                         
                         self.scanned_count += 1
                         if self.progress_callback and self.scanned_count % 100 == 0:
@@ -207,9 +218,13 @@ class DiskScanner:
             except (PermissionError, OSError):
                 pass
         
-        scan_recursive(disk_path)
-        scan_recursive(disk_path)
-        return nodes_to_process, seen_paths
+        # Démarrer le scan récursif
+        # Si root_id est None, les éléments à la racine auront parent_id=None (correct pour racine disque ?)
+        # Non, la racine disque elle-même a déjà été insérée par scan_disk dans sync_coordinator
+        # Donc tous les éléments de scandir(disk_path) doivent avoir parent_id = root_id
+        scan_recursive(disk_path, root_id)
+        
+        return [], seen_paths
     
     def _should_ignore(self, path: str) -> bool:
         """Vérifie si un chemin doit être ignoré."""

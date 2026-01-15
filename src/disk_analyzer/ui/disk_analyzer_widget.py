@@ -4,9 +4,10 @@ Disk Analyzer Widget - UI for space optimization.
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QTreeWidget, QTreeWidgetItem, QComboBox,
-                               QProgressBar, QMessageBox, QSplitter, QTabWidget, QTextEdit)
-from PySide6.QtCore import Qt, Signal, QThread, QTimer
-from PySide6.QtGui import QFont, QMovie
+                               QProgressBar, QMessageBox, QSplitter, QTabWidget, QTextEdit,
+                               QTableWidget, QTableWidgetItem, QHeaderView)
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize
+from PySide6.QtGui import QFont, QMovie, QColor, QPainter, QBrush
 from pathlib import Path
 from ..sync_coordinator import SyncCoordinator
 from ..scanner import DiskScanner
@@ -76,6 +77,8 @@ class DiskAnalysisPage(QWidget):
         self.combo_disk = QComboBox()
         self.combo_disk.setMinimumWidth(150)
         self.combo_disk.setMinimumHeight(35)
+        # Connecter le changement de sélection
+        self.combo_disk.currentTextChanged.connect(self.on_disk_changed)
         toolbar_layout.addWidget(self.combo_disk)
         
         self.btn_scan = QPushButton("🔍 Scanner")
@@ -95,8 +98,9 @@ class DiskAnalysisPage(QWidget):
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("Rechercher un fichier ou dossier...")
         self.txt_search.setMinimumHeight(35)
+        self.txt_search.setMaximumWidth(400)  # Limite la largeur de la recherche
         self.txt_search.returnPressed.connect(self.perform_search)
-        toolbar_layout.addWidget(self.txt_search, 1)
+        toolbar_layout.addWidget(self.txt_search)
         
         self.btn_search = QPushButton("🔎")
         self.btn_search.setObjectName("btnSearch")
@@ -105,6 +109,9 @@ class DiskAnalysisPage(QWidget):
         self.btn_search.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_search.clicked.connect(self.perform_search)
         toolbar_layout.addWidget(self.btn_search)
+        
+        # Ajouter un stretch à la fin pour pousser tout à gauche
+        toolbar_layout.addStretch()
         
         layout.addWidget(toolbar)
         
@@ -133,7 +140,7 @@ class DiskAnalysisPage(QWidget):
         self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_bar)
         
-        # Content area
+        # Content area - Cette section doit s'étirer
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Left: Tree view
@@ -154,7 +161,10 @@ class DiskAnalysisPage(QWidget):
         self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderLabels(["Nom", "Taille", "Type"])
         self.tree_widget.setColumnWidth(0, 250)
+        self.tree_widget.setAnimated(True)  # Animation lors du dépliage
+        self.tree_widget.setIndentation(20)  # Indentation pour les niveaux
         self.tree_widget.itemClicked.connect(self.on_tree_item_clicked)
+        self.tree_widget.itemExpanded.connect(self.on_tree_item_expanded)
         left_layout.addWidget(self.tree_widget)
         
         content_splitter.addWidget(left_widget)
@@ -176,26 +186,60 @@ class DiskAnalysisPage(QWidget):
         self.txt_details.setMaximumHeight(150)
         right_layout.addWidget(self.txt_details)
         
-        lbl_stats = QLabel("📈 Statistiques")
+        # Custom Disk Usage Bar
+        self.disk_usage_bar = QProgressBar()
+        self.disk_usage_bar.setTextVisible(True)
+        self.disk_usage_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.disk_usage_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid lightgrey;
+                border-radius: 5px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #3498db;
+                width: 10px;
+                margin: 0.5px;
+            }
+        """)
+        self.disk_usage_bar.setFormat("%p% Utilisé")
+        right_layout.addWidget(self.disk_usage_bar)
+        
+        lbl_stats = QLabel("📈 Statistiques (Top Fichiers)")
         lbl_stats.setFont(tree_font)
         lbl_stats.setStyleSheet("color: #2c3e50;")
         right_layout.addWidget(lbl_stats)
         
-        self.txt_stats = QTextEdit()
-        self.txt_stats.setReadOnly(True)
-        right_layout.addWidget(self.txt_stats)
+        # Table pour les stats avec barres visuelles
+        self.table_stats = QTableWidget()
+        self.table_stats.setColumnCount(4)
+        self.table_stats.setHorizontalHeaderLabels(["Nom", "Barre", "Taille", "%"])
+        self.table_stats.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table_stats.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table_stats.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_stats.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table_stats.verticalHeader().setVisible(False)
+        self.table_stats.setShowGrid(False)
+        self.table_stats.setAlternatingRowColors(True)
+        right_layout.addWidget(self.table_stats)
         
         content_splitter.addWidget(right_widget)
         content_splitter.setStretchFactor(0, 2)
         content_splitter.setStretchFactor(1, 1)
         
-        layout.addWidget(content_splitter)
+        layout.addWidget(content_splitter, 1)  # Stretch factor de 1 pour cette section
 
     def load_disks(self):
         """Charge la liste des disques disponibles."""
+        self.combo_disk.blockSignals(True)  # Éviter déclenchement intempestif
         self.combo_disk.clear()
         disks = DiskScanner.get_available_disks()
         self.combo_disk.addItems(disks)
+        self.combo_disk.blockSignals(False)
+        
+        # Initialiser avec le premier disque si disponible
+        if disks:
+            self.on_disk_changed(disks[0])
 
     def select_disk(self, disk_path: str):
         """Sélectionne un disque spécifique."""
@@ -209,6 +253,17 @@ class DiskAnalysisPage(QWidget):
             if index >= 0:
                 self.combo_disk.setCurrentIndex(index)
 
+    def on_disk_changed(self, disk_path: str):
+        """Appelé quand le disque sélectionné change."""
+        if not disk_path:
+            return
+            
+        self.current_disk = disk_path
+        
+        # Charger les données persistantes immédiatement
+        self.load_tree()
+        self.load_stats()
+        
     def start_scan(self):
         """Démarre le scan d'un disque."""
         disk = self.combo_disk.currentText()
@@ -216,7 +271,9 @@ class DiskAnalysisPage(QWidget):
             QMessageBox.warning(self, "Attention", "Veuillez sélectionner un disque.")
             return
         
+        # S'assurer que current_disk est à jour
         self.current_disk = disk
+        
         self.btn_scan.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
@@ -284,9 +341,9 @@ class DiskAnalysisPage(QWidget):
                 if node_data:
                     existing_items[node_data.path] = child
         else:
-            count = self.tree.topLevelItemCount()
+            count = self.tree_widget.topLevelItemCount()
             for i in range(count):
-                child = self.tree.topLevelItem(i)
+                child = self.tree_widget.topLevelItem(i)
                 node_data = child.data(0, Qt.ItemDataRole.UserRole)
                 if node_data:
                     existing_items[node_data.path] = child
@@ -305,15 +362,18 @@ class DiskAnalysisPage(QWidget):
                 if parent_item:
                     item = QTreeWidgetItem(parent_item)
                 else:
-                    item = QTreeWidgetItem(self.tree)
+                    item = QTreeWidgetItem(self.tree_widget)
                 
-                item.setText(0, node.name)
+                # Ajouter des icônes pour dossiers et fichiers
+                if node.type.name == "DIR":
+                    item.setText(0, f"📁 {node.name}")
+                else:
+                    icon = self.get_file_icon(node.extension)
+                    item.setText(0, f"{icon} {node.name}")
+                    
                 item.setText(1, text_size)
                 item.setText(2, node.type.name)
                 item.setData(0, Qt.ItemDataRole.UserRole, node)
-                
-                # Icône (simple texte pour l'instant ou standard)
-                # item.setIcon(0, ...) 
                 
                 # Ajouter dummy si dossier pour permettre l'expansion
                 if node.type.name == "DIR":
@@ -359,7 +419,7 @@ class DiskAnalysisPage(QWidget):
             return
         
         # Créer l'item racine
-        root_item = QTreeWidgetItem([root_node.name, self.format_size(root_node.size), "Disque"])
+        root_item = QTreeWidgetItem([f"💽 {root_node.name}", self.format_size(root_node.size), "Disque"])
         root_item.setData(0, Qt.ItemDataRole.UserRole, root_node.id)
         self.tree_widget.addTopLevelItem(root_item)
         
@@ -377,6 +437,15 @@ class DiskAnalysisPage(QWidget):
             
             item = QTreeWidgetItem([child.name, size_str, type_str])
             item.setData(0, Qt.ItemDataRole.UserRole, child.id)
+            
+            # Ajouter des icônes pour dossiers et fichiers
+            if child.type == NodeType.DIR:
+                item.setText(0, f"📁 {child.name}")
+            else:
+                # Icône basée sur l'extension
+                icon = self.get_file_icon(child.extension)
+                item.setText(0, f"{icon} {child.name}")
+            
             parent_item.addChild(item)
             
             # Ajouter un placeholder pour les dossiers (lazy loading)
@@ -384,16 +453,22 @@ class DiskAnalysisPage(QWidget):
                 placeholder = QTreeWidgetItem(["..."])
                 item.addChild(placeholder)
     
+    def on_tree_item_expanded(self, item: QTreeWidgetItem):
+        """Appelé quand un item est déplié - lazy loading."""
+        node_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if not node_id:
+            return
+        
+        # Charger les enfants si c'est la première fois (placeholder présent)
+        if item.childCount() == 1 and item.child(0).text(0) == "...":
+            item.removeChild(item.child(0))
+            self.load_tree_children(item, node_id)
+    
     def on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """Appelé quand un item de l'arbre est cliqué."""
         node_id = item.data(0, Qt.ItemDataRole.UserRole)
         if not node_id:
             return
-        
-        # Charger les enfants si nécessaire (lazy loading)
-        if item.childCount() == 1 and item.child(0).text(0) == "...":
-            item.removeChild(item.child(0))
-            self.load_tree_children(item, node_id)
         
         # Afficher les détails
         self.show_node_details(node_id)
@@ -425,6 +500,14 @@ class DiskAnalysisPage(QWidget):
                 type_str = "Dossier" if node.type == NodeType.DIR else "Fichier"
                 
                 item = QTreeWidgetItem([node.name, size_str, type_str])
+                
+                # Ajouter des icônes
+                if node.type == NodeType.DIR:
+                    item.setText(0, f"📁 {node.name}")
+                else:
+                    icon = self.get_file_icon(node.extension)
+                    item.setText(0, f"{icon} {node.name}")
+                    
                 item.setData(0, Qt.ItemDataRole.UserRole, node.id)
                 item.setToolTip(0, node.path)
                 self.tree_widget.addTopLevelItem(item)
@@ -433,26 +516,141 @@ class DiskAnalysisPage(QWidget):
             QMessageBox.critical(self, "Erreur", f"Erreur de recherche:\n{e}")
     
     def load_stats(self):
-        """Charge les statistiques du disque."""
+        """Charge les statistiques du disque et met à jour l'UI."""
+        if not self.current_disk:
+            return
+            
         try:
-            # Top fichiers
-            top_files = self.coordinator.get_top_files(10)
+            # 1. Espace Disque
+            usage = self.coordinator.get_disk_usage(self.current_disk)
             
-            # Stats par extension
-            ext_stats = self.coordinator.get_extension_stats()
+            percent = int(usage["percent"])
+            self.disk_usage_bar.setValue(percent)
             
-            stats_text = "=== Top 10 Fichiers ===\n\n"
-            for i, node in enumerate(top_files, 1):
-                stats_text += f"{i}. {node.name}\n   Taille: {self.format_size(node.size)}\n\n"
+            used_str = self.format_size(usage["used"])
+            total_str = self.format_size(usage["total"])
+            free_str = self.format_size(usage["free"])
             
-            stats_text += "\n=== Répartition par Extension ===\n\n"
-            for ext, count, total_size in ext_stats[:10]:
-                stats_text += f"{ext or 'Sans extension'}: {count} fichiers, {self.format_size(total_size)}\n"
+            self.disk_usage_bar.setFormat(f"{percent}% Utilisé ({used_str} / {total_str}) - Libre: {free_str}")
             
-            self.txt_stats.setPlainText(stats_text)
-        
+            # Couleur dynamique selon l'usage
+            if percent < 70:
+                color = "#2ecc71" # Vert
+            elif percent < 90:
+                color = "#f1c40f" # Jaune
+            else:
+                color = "#e74c3c" # Rouge
+                
+            self.disk_usage_bar.setStyleSheet(f"""
+                QProgressBar {{
+                    border: 2px solid lightgrey;
+                    border-radius: 5px;
+                    text-align: center;
+                    color: black;
+                    font-weight: bold;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {color};
+                    border-radius: 3px;
+                }}
+            """)
+            
+            # 2. Top Fichiers
+            top_files = self.coordinator.get_top_files(20)
+            
+            self.table_stats.setRowCount(0)
+            
+            if not top_files:
+                return
+
+            # Calculer le % relatif à l'espace UTILISÉ (pas total)
+            # Ou relatif au plus gros fichier de la liste pour l'échelle visuelle
+            max_size = top_files[0].size if top_files else 1
+            total_used_scanned = sum(node.size for node in top_files) # Somme des top fichiers pour référence ou usage total réel
+            
+            # Utilisons l'espace TOTAL UTILISÉ du disque pour le % réel
+            disk_used = usage["used"] if usage["used"] > 0 else 1
+            
+            self.table_stats.setRowCount(len(top_files))
+            
+            for i, node in enumerate(top_files):
+                # Nom + Icône
+                icon = self.get_file_icon(node.extension)
+                item_name = QTableWidgetItem(f"{icon} {node.name}")
+                self.table_stats.setItem(i, 0, item_name)
+                
+                # Taille
+                item_size = QTableWidgetItem(self.format_size(node.size))
+                item_size.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table_stats.setItem(i, 2, item_size)
+                
+                # Pourcentage (relatif à l'espace utilisé du disque)
+                percent_val = (node.size / disk_used) * 100
+                percent_str = f"{percent_val:.4f}%" if percent_val < 1 else f"{percent_val:.1f}%"
+                
+                item_percent = QTableWidgetItem(percent_str)
+                item_percent.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table_stats.setItem(i, 3, item_percent)
+                
+                # Barre visuelle (Widget custom)
+                # Le max de la barre est relatif au plus gros fichier pour qu'on voit bien les différences
+                bar = QProgressBar()
+                bar.setMaximum(100)
+                # Pour la barre visuelle, on compare au plus gros fichier de la liste (100% = le plus gros)
+                # Sinon toutes les barres seraient minuscules (0.01% du disque)
+                visual_percent = int((node.size / max_size) * 100)
+                bar.setValue(visual_percent)
+                bar.setTextVisible(False)
+                bar.setStyleSheet("""
+                    QProgressBar {
+                        border: none;
+                        background: transparent;
+                        height: 10px;
+                    }
+                    QProgressBar::chunk {
+                        background-color: #9b59b6;
+                        border-radius: 2px;
+                    }
+                """)
+                self.table_stats.setCellWidget(i, 1, bar)
+                
         except Exception as e:
-            self.txt_stats.setPlainText(f"Erreur lors du chargement des stats:\n{e}")
+            QMessageBox.warning(self, "Erreur Stats", f"Impossible de charger les statistiques: {e}")
+    
+    @staticmethod
+    def get_file_icon(extension: str) -> str:
+        """Retourne une icône basée sur l'extension du fichier."""
+        if not extension:
+            return "📄"
+        
+        ext = extension.lower()
+        
+        # Images
+        if ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.ico']:
+            return "🖼️"
+        # Vidéos
+        elif ext in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv']:
+            return "🎬"
+        # Audio
+        elif ext in ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a']:
+            return "🎵"
+        # Archives
+        elif ext in ['.zip', '.rar', '.7z', '.tar', '.gz', '.bz2']:
+            return "📦"
+        # Code
+        elif ext in ['.py', '.js', '.java', '.cpp', '.c', '.h', '.cs', '.go', '.rs']:
+            return "💻"
+        # Documents
+        elif ext in ['.pdf', '.doc', '.docx', '.txt', '.rtf']:
+            return "📝"
+        # Tableurs
+        elif ext in ['.xls', '.xlsx', '.csv']:
+            return "📊"
+        # Exécutables
+        elif ext in ['.exe', '.msi', '.app', '.deb', '.rpm']:
+            return "⚙️"
+        else:
+            return "📄"
     
     @staticmethod
     def format_size(size: int) -> str:
