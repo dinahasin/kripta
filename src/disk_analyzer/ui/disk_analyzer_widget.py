@@ -4,7 +4,7 @@ Disk Analyzer Widget - UI for space optimization.
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QTreeWidget, QTreeWidgetItem, QComboBox,
-                               QProgressBar, QMessageBox, QSplitter, QFrame, QTextEdit)
+                               QProgressBar, QMessageBox, QSplitter, QTabWidget, QTextEdit)
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont
 from pathlib import Path
@@ -12,6 +12,7 @@ from ..sync_coordinator import SyncCoordinator
 from ..scanner import DiskScanner
 from ..models import Node, NodeType
 from src.core.config import SECURITY_DIR
+from .drive_manager_widget import DriveManagerWidget
 
 
 class ScanThread(QThread):
@@ -35,10 +36,8 @@ class ScanThread(QThread):
             self.finished.emit(False, str(e))
 
 
-class DiskAnalyzerWidget(QWidget):
-    """Widget principal pour l'analyse de disque."""
-    
-    back_requested = Signal()
+class DiskAnalysisPage(QWidget):
+    """Page d'analyse de disque (anciennement l'unique contenu)."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,44 +50,18 @@ class DiskAnalyzerWidget(QWidget):
         self.current_disk = None
         
         self.setup_ui()
-        self.apply_modern_style()
         self.load_disks()
-    
+        
     def setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(0)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Header
-        header = QWidget()
-        header.setObjectName("header")
-        header.setMinimumHeight(60)
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(20, 10, 20, 10)
-        
-        btn_back = QPushButton("← Retour")
-        btn_back.setObjectName("btnBack")
-        btn_back.setMinimumHeight(40)
-        btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_back.clicked.connect(self.back_requested.emit)
-        header_layout.addWidget(btn_back)
-        
-        lbl_title = QLabel("Analyseur d'Espace Disque")
-        title_font = QFont()
-        title_font.setPointSize(16)
-        title_font.setBold(True)
-        lbl_title.setFont(title_font)
-        lbl_title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(lbl_title)
-        
-        header_layout.addStretch()
-        main_layout.addWidget(header)
-        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
         # Toolbar
         toolbar = QWidget()
         toolbar.setObjectName("toolbar")
         toolbar_layout = QHBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(20, 10, 20, 10)
+        toolbar_layout.setContentsMargins(0, 0, 0, 10)
         toolbar_layout.setSpacing(15)
         
         # Sélection de disque
@@ -129,14 +102,14 @@ class DiskAnalyzerWidget(QWidget):
         self.btn_search.clicked.connect(self.perform_search)
         toolbar_layout.addWidget(self.btn_search)
         
-        main_layout.addWidget(toolbar)
+        layout.addWidget(toolbar)
         
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setMinimumHeight(5)
         self.progress_bar.setTextVisible(False)
-        main_layout.addWidget(self.progress_bar)
+        layout.addWidget(self.progress_bar)
         
         # Content area
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -145,7 +118,7 @@ class DiskAnalyzerWidget(QWidget):
         left_widget = QWidget()
         left_widget.setObjectName("leftPanel")
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(20, 20, 20, 20)
+        left_layout.setContentsMargins(0, 0, 10, 0)
         left_layout.setSpacing(10)
         
         lbl_tree = QLabel("📁 Arborescence")
@@ -168,7 +141,7 @@ class DiskAnalyzerWidget(QWidget):
         right_widget = QWidget()
         right_widget.setObjectName("rightPanel")
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(20, 20, 20, 20)
+        right_layout.setContentsMargins(10, 0, 0, 0)
         right_layout.setSpacing(15)
         
         lbl_details = QLabel("📊 Détails")
@@ -194,135 +167,31 @@ class DiskAnalyzerWidget(QWidget):
         content_splitter.setStretchFactor(0, 2)
         content_splitter.setStretchFactor(1, 1)
         
-        main_layout.addWidget(content_splitter)
-    
-    def apply_modern_style(self):
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f5f6fa;
-            }
-            
-            #header {
-                background-color: #ffffff;
-                border-bottom: 2px solid #ecf0f1;
-            }
-            
-            #toolbar {
-                background-color: #ffffff;
-                border-bottom: 1px solid #ecf0f1;
-            }
-            
-            #btnBack {
-                background-color: #ecf0f1;
-                color: #2c3e50;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 8px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            
-            #btnBack:hover {
-                background-color: #d5dbdb;
-            }
-            
-            #btnScan {
-                background-color: #3498db;
-                color: white;
-                padding: 8px 20px;
-                border: none;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            
-            #btnScan:hover {
-                background-color: #2980b9;
-            }
-            
-            #btnSearch {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 6px;
-            }
-            
-            #btnSearch:hover {
-                background-color: #2980b9;
-            }
-            
-            #leftPanel, #rightPanel {
-                background-color: #ffffff;
-                border-radius: 8px;
-            }
-            
-            QLineEdit, QComboBox {
-                padding: 8px 12px;
-                border: 2px solid #e0e0e0;
-                border-radius: 6px;
-                background-color: #f8f9fa;
-            }
-            
-            QLineEdit:focus, QComboBox:focus {
-                border: 2px solid #3498db;
-                background-color: #ffffff;
-            }
-            
-            QTreeWidget {
-                border: 1px solid #ecf0f1;
-                border-radius: 6px;
-                background-color: #ffffff;
-            }
-            
-            QTreeWidget::item {
-                padding: 5px;
-            }
-            
-            QTreeWidget::item:hover {
-                background-color: #ecf0f1;
-            }
-            
-            QTreeWidget::item:selected {
-                background-color: #3498db;
-                color: white;
-            }
-            
-            QTextEdit {
-                border: 1px solid #ecf0f1;
-                border-radius: 6px;
-                padding: 10px;
-                background-color: #f8f9fa;
-            }
-            
-            QProgressBar {
-                border: none;
-                background-color: #ecf0f1;
-            }
-            
-            QProgressBar::chunk {
-                background-color: #3498db;
-            }
-        """)
-    
+        layout.addWidget(content_splitter)
+
     def load_disks(self):
         """Charge la liste des disques disponibles."""
+        self.combo_disk.clear()
         disks = DiskScanner.get_available_disks()
         self.combo_disk.addItems(disks)
-    
+
+    def select_disk(self, disk_path: str):
+        """Sélectionne un disque spécifique."""
+        index = self.combo_disk.findText(disk_path)
+        if index >= 0:
+            self.combo_disk.setCurrentIndex(index)
+        else:
+            # Si le disque n'est pas dans la liste (ex: vient d'être monté)
+            self.load_disks()
+            index = self.combo_disk.findText(disk_path)
+            if index >= 0:
+                self.combo_disk.setCurrentIndex(index)
+
     def start_scan(self):
         """Démarre le scan d'un disque."""
         disk = self.combo_disk.currentText()
         if not disk:
             QMessageBox.warning(self, "Attention", "Veuillez sélectionner un disque.")
-            return
-        
-        reply = QMessageBox.question(
-            self,
-            "Confirmation",
-            f"Scanner le disque {disk} ?\n\nCela peut prendre plusieurs minutes.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply != QMessageBox.StandardButton.Yes:
             return
         
         self.current_disk = disk
@@ -348,7 +217,7 @@ class DiskAnalyzerWidget(QWidget):
         self.progress_bar.setVisible(False)
         
         if success:
-            QMessageBox.information(self, "Succès", f"✓ {message}")
+            # QMessageBox.information(self, "Succès", f"✓ {message}") # Trop intrusif
             self.load_tree()
             self.load_stats()
         else:
@@ -472,6 +341,145 @@ class DiskAnalyzerWidget(QWidget):
         return f"{size:.1f} Po"
     
     def closeEvent(self, event):
-        """Ferme les connexions lors de la fermeture du widget."""
         self.coordinator.close()
-        event.accept()
+        super().closeEvent(event)
+
+
+class DiskAnalyzerWidget(QWidget):
+    """Widget principal contenant les onglets."""
+    
+    back_requested = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setup_ui()
+        self.apply_modern_style()
+        
+    def setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Header commun
+        header = QWidget()
+        header.setObjectName("header")
+        header.setMinimumHeight(60)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 10, 20, 10)
+        
+        btn_back = QPushButton("← Retour")
+        btn_back.setObjectName("btnBack")
+        btn_back.setMinimumHeight(40)
+        btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_back.clicked.connect(self.back_requested.emit)
+        header_layout.addWidget(btn_back)
+        
+        lbl_title = QLabel("Optimisation et Gestion d'Espace")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        lbl_title.setFont(title_font)
+        lbl_title.setStyleSheet("color: #2c3e50;")
+        header_layout.addWidget(lbl_title)
+        
+        header_layout.addStretch()
+        main_layout.addWidget(header)
+        
+        # Tabs
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("mainTabs")
+        
+        # Page Analyse
+        self.analysis_page = DiskAnalysisPage()
+        
+        # Page Gestion Disques
+        self.drive_manager = DriveManagerWidget()
+        
+        # Connexion : Demander un scan depuis le manager
+        self.drive_manager.scan_requested_from_manager.connect(self.switch_to_scan)
+        
+        self.tabs.addTab(self.analysis_page, "📊 Analyseur d'Espace")
+        self.tabs.addTab(self.drive_manager, "💾 Gestion des Disques")
+        
+        main_layout.addWidget(self.tabs)
+        
+    def switch_to_scan(self, path: str):
+        """Passe à l'onglet scan et sélectionne le chemin."""
+        self.tabs.setCurrentIndex(0)
+        self.analysis_page.select_disk(path)
+        self.analysis_page.start_scan()
+        
+    def apply_modern_style(self):
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #f5f6fa;
+            }
+            
+            #header {
+                background-color: #ffffff;
+                border-bottom: 2px solid #ecf0f1;
+            }
+            
+            #btnBack {
+                background-color: #ecf0f1;
+                color: #2c3e50;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            
+            #btnBack:hover {
+                background-color: #d5dbdb;
+            }
+            
+            QTabWidget::pane {
+                border: 1px solid #ecf0f1;
+                background-color: white;
+            }
+            
+            QTabBar::tab {
+                background: #ecf0f1;
+                color: #2c3e50;
+                padding: 10px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                font-weight: bold;
+            }
+            
+            QTabBar::tab:selected {
+                background: white;
+                border-bottom: 2px solid #3498db;
+                color: #3498db;
+            }
+            
+            QTabBar::tab:hover {
+                background: #e0e0e0;
+            }
+            
+            /* Styles hérités pour les sous-composants */
+            #btnScan, #btnSearch {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+             #btnScan:hover, #btnSearch:hover {
+                background-color: #2980b9;
+            }
+            
+            QLineEdit, QComboBox, QTextEdit, QTreeWidget {
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: #ffffff;
+                padding: 5px;
+            }
+            
+            QTreeWidget::item:selected {
+                background-color: #3498db;
+                color: white;
+            }
+        """)

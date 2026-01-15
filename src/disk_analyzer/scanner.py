@@ -20,13 +20,30 @@ class DiskScanner:
     
     @staticmethod
     def get_available_disks() -> List[str]:
-        """Récupère la liste des disques disponibles (Windows)."""
+        """Récupère la liste des disques disponibles (Cross-platform)."""
         drives = []
-        for letter in string.ascii_uppercase:
-            drive = f"{letter}:\\"
-            if os.path.exists(drive):
-                drives.append(drive)
-        return drives
+        
+        if os.name == 'nt':  # Windows
+            for letter in string.ascii_uppercase:
+                drive = f"{letter}:\\"
+                if os.path.exists(drive):
+                    drives.append(drive)
+        else:  # Linux / Unix
+            try:
+                with open("/proc/mounts", "r") as f:
+                    for line in f:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            device, mountpoint = parts[0], parts[1]
+                            # Filtrer les montages système virtuels et temporaires
+                            if device.startswith("/dev/") and not mountpoint.startswith(("/boot", "/snap")):
+                                drives.append(mountpoint)
+            except Exception:
+                # Fallback simple
+                if os.path.exists("/"):
+                    drives.append("/")
+                    
+        return sorted(list(set(drives)))
     
     def scan_path(self, root_path: str, parent_id: Optional[int] = None) -> List[Node]:
         """

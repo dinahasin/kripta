@@ -2,7 +2,11 @@
 Tantivy service for fast full-text search.
 """
 
-import tantivy
+try:
+    import tantivy
+except ImportError:
+    tantivy = None
+
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -13,6 +17,11 @@ class TantivyService:
     """Service de recherche Tantivy pour indexation rapide."""
     
     def __init__(self, index_path: Path):
+        self.enabled = tantivy is not None
+        if not self.enabled:
+            print("Warning: Tantivy module not found. Search index disabled.")
+            return
+
         self.index_path = index_path
         self.index_path.mkdir(parents=True, exist_ok=True)
         self._initialize_index()
@@ -42,6 +51,9 @@ class TantivyService:
     
     def add_document(self, node: Node):
         """Ajoute un document à l'index."""
+        if not self.enabled:
+            return
+
         doc = tantivy.Document()
         doc.add_text("name", node.name)
         doc.add_text("path", node.path)
@@ -61,20 +73,29 @@ class TantivyService:
     
     def update_document(self, node: Node):
         """Met à jour un document (supprime puis réajoute)."""
+        if not self.enabled:
+            return
         self.delete_document(node.path)
         self.add_document(node)
     
     def delete_document(self, path: str):
         """Supprime un document par son chemin."""
+        if not self.enabled:
+            return
         self.writer.delete_documents("path", path)
     
     def commit(self):
         """Commit les changements."""
+        if not self.enabled:
+            return
         self.writer.commit()
         self.writer = self.index.writer()
     
     def search(self, query_str: str, limit: int = 100) -> List[dict]:
         """Recherche dans l'index."""
+        if not self.enabled:
+            return []
+            
         searcher = self.index.searcher()
         query_parser = tantivy.QueryParser.for_index(self.index, ["name", "path"])
         
@@ -101,4 +122,6 @@ class TantivyService:
     
     def close(self):
         """Ferme le writer."""
+        if not self.enabled:
+            return
         self.writer.commit()
