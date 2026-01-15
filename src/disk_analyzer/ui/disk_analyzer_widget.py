@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineE
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize
 from PySide6.QtGui import QFont, QMovie, QColor, QPainter, QBrush
 from pathlib import Path
+from typing import Optional
 from ..sync_coordinator import SyncCoordinator
 from ..scanner import DiskScanner
 from ..models import Node, NodeType
@@ -434,38 +435,64 @@ class DiskAnalysisPage(QWidget):
             if not root_node:
                 return
         
-        # Corriger la hiérarchie pour ce disque si nécessaire (une seule fois)
-        # Cela garantit que tous les parent_id sont corrects
-        try:
-            fixed = self.coordinator.fix_hierarchy(normalized_disk)
-            if fixed > 0:
-                print(f"Correction de {fixed} nœuds dans la hiérarchie pour {normalized_disk}")
-                # Recharger le nœud racine après correction
-                root_node = self.coordinator.get_node_by_path(normalized_disk)
-                if not root_node:
-                    root_node = self.coordinator.get_node_by_path(self.current_disk)
-        except Exception as e:
-            print(f"Erreur lors de la correction de la hiérarchie: {e}")
+        # NOTE: La correction de hiérarchie est désactivée au chargement pour améliorer les performances
+        # Elle peut être effectuée manuellement si nécessaire, ou après un scan
+        # La correction automatique ralentit trop l'ouverture de l'interface
+        # Si vous voulez corriger la hiérarchie, utilisez: coordinator.fix_hierarchy(disk_path)
         
         # Créer l'item racine
         root_item = QTreeWidgetItem([f"💽 {root_node.name}", self.format_size(root_node.size), "Disque"])
         root_item.setData(0, Qt.ItemDataRole.UserRole, root_node)  # Stocker le Node complet, pas juste l'ID
         self.tree_widget.addTopLevelItem(root_item)
         
-        # Charger le contenu du disque
+        # NE PAS charger tous les enfants immédiatement - lazy loading uniquement
+        # Ajouter un placeholder pour indiquer qu'il y a des enfants à charger
         if root_node.id:
-            self.load_tree_children(root_item, root_node.id)
-        root_item.setExpanded(True)
+            # Vérifier rapidement s'il y a des enfants sans tout charger
+            has_children = self._has_children(root_node.id)
+            if has_children:
+                placeholder = QTreeWidgetItem(["..."])
+                root_item.addChild(placeholder)
+        
+        # Ne pas développer automatiquement la racine - laisser l'utilisateur le faire
+        # root_item.setExpanded(True)  # Commenté pour éviter le chargement automatique
         
 
     
-    def load_tree_children(self, parent_item: QTreeWidgetItem, parent_id: int):
-        """Charge les enfants d'un nœud dans l'arbre."""
+    def _has_children(self, parent_id: int) -> bool:
+        """Vérifie rapidement si un nœud a des enfants sans tout charger."""
+        try:
+            # Requête optimisée: juste compter, ne pas charger tous les nœuds
+            from ..sqlite_service import SQLiteService
+            cursor = self.coordinator.sqlite.conn.execute(
+                "SELECT COUNT(*) FROM nodes WHERE parent_id = ? LIMIT 1",
+                (parent_id,)
+            )
+            result = cursor.fetchone()
+            return result[0] > 0 if result else False
+        except Exception:
+            return False
+    
+    def load_tree_children(self, parent_item: QTreeWidgetItem, parent_id: int, limit: Optional[int] = None):
+        """
+        Charge les enfants d'un nœud dans l'arbre de manière incrémentale.
+        
+        Args:
+            parent_item: L'item parent dans l'arbre
+            parent_id: L'ID du nœud parent dans la base
+            limit: Nombre maximum d'enfants à charger (None = tous, pour performance)
+        """
         if not parent_id:
             return
         
         try:
-            children = self.coordinator.get_children(parent_id)
+            # Charger les enfants avec une limite pour améliorer les performances
+            # Si limit est None, charger tous les enfants (comportement par défaut)
+            if limit is None:
+                children = self.coordinator.get_children(parent_id)
+            else:
+                # Charger seulement un nombre limité d'enfants pour les grandes arborescences
+                children = self.coordinator.get_children_limited(parent_id, limit)
         except Exception as e:
             print(f"Erreur lors de la récupération des enfants pour parent_id={parent_id}: {e}")
             return
@@ -497,11 +524,13 @@ class DiskAnalysisPage(QWidget):
             
             # Ajouter un placeholder pour les dossiers (lazy loading)
             if child.type == NodeType.DIR:
-                placeholder = QTreeWidgetItem(["..."])
-                item.addChild(placeholder)
+                # Vérifier rapidement s'il y a des enfants
+                if child.id and self._has_children(child.id):
+                    placeholder = QTreeWidgetItem(["..."])
+                    item.addChild(placeholder)
     
     def on_tree_item_expanded(self, item: QTreeWidgetItem):
-        """Appelé quand un item est déplié - lazy loading."""
+        """Appelé quand un item est déplié - lazy loading incrémental."""
         node = item.data(0, Qt.ItemDataRole.UserRole)
         if not node or not hasattr(node, 'id'):
             # Support rétrocompatibilité si on a stocké juste l'ID
@@ -514,7 +543,9 @@ class DiskAnalysisPage(QWidget):
         # Charger les enfants si c'est la première fois (placeholder présent)
         if item.childCount() == 1 and item.child(0).text(0) == "...":
             item.removeChild(item.child(0))
-            self.load_tree_children(item, node_id)
+            # Charger les enfants de manière incrémentale (limite initiale pour performance)
+            # On charge d'abord 100 enfants, puis on peut charger plus si nécessaire
+            self.load_tree_children(item, node_id, limit=100)
     
     def on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """Appelé quand un item de l'arbre est cliqué."""

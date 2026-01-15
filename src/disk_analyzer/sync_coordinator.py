@@ -85,9 +85,22 @@ class SyncCoordinator:
             # Recherche SQLite FTS5
             return self.sqlite.search_fts(query, limit)
     
-    def get_children(self, parent_id: int) -> List[Node]:
-        """Récupère les enfants d'un nœud."""
-        return self.sqlite.get_children(parent_id)
+    def get_children(self, parent_id: int, limit: Optional[int] = None) -> List[Node]:
+        """
+        Récupère les enfants d'un nœud.
+        
+        Args:
+            parent_id: ID du nœud parent
+            limit: Nombre maximum d'enfants à retourner (None = tous)
+        
+        Returns:
+            Liste des nœuds enfants
+        """
+        return self.sqlite.get_children(parent_id, limit)
+    
+    def get_children_limited(self, parent_id: int, limit: int) -> List[Node]:
+        """Récupère un nombre limité d'enfants d'un nœud (alias pour compatibilité)."""
+        return self.sqlite.get_children(parent_id, limit)
     
     def get_node_by_path(self, path: str) -> Optional[Node]:
         """Récupère un nœud par son chemin (Robuste)."""

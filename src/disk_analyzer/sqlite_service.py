@@ -286,13 +286,26 @@ class SQLiteService:
         
         return None
     
-    def get_children(self, parent_id: int) -> List[Node]:
-        """Récupère les enfants d'un nœud."""
-        cursor = self.conn.execute("""
+    def get_children(self, parent_id: int, limit: Optional[int] = None) -> List[Node]:
+        """
+        Récupère les enfants d'un nœud.
+        
+        Args:
+            parent_id: ID du nœud parent
+            limit: Nombre maximum d'enfants à retourner (None = tous)
+        
+        Returns:
+            Liste des nœuds enfants
+        """
+        query = """
             SELECT id, parent_id, type, name, path, size, mtime, ctime, extension
             FROM nodes WHERE parent_id = ?
             ORDER BY type, name
-        """, (parent_id,))
+        """
+        if limit is not None:
+            query += f" LIMIT {limit}"
+        
+        cursor = self.conn.execute(query, (parent_id,))
         return [Node.from_db_row(row) for row in cursor.fetchall()]
     
     def delete_node(self, path: str) -> bool:
