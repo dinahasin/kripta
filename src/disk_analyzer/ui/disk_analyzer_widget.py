@@ -167,6 +167,48 @@ class DiskAnalysisPage(QWidget):
         self.tree_widget.itemExpanded.connect(self.on_tree_item_expanded)
         left_layout.addWidget(self.tree_widget)
         
+        # --- DEBUG: ARBRE STATIQUE (DEMANDE UTILISATEUR) ---
+        from PySide6.QtWidgets import QGroupBox
+        group_debug = QGroupBox("Démo Arborescence Statique (Preuve de Concept)")
+        group_debug.setStyleSheet("QGroupBox { font-weight: bold; color: #e67e22; border: 1px solid #e67e22; margin-top: 10px; }")
+        layout_debug = QVBoxLayout(group_debug)
+        debug_tree = QTreeWidget()
+        debug_tree.setHeaderLabels(["Nom", "Taille", "Type"])
+        debug_tree.setAnimated(True)
+        debug_tree.setIndentation(20)
+        
+        # Création fausses données
+        root_demo = QTreeWidgetItem(["Disque Exemple (C:)", "100 GB", "Disque"])
+        # Note: get_file_icon methods might need self if used here? Yes self exists.
+        # But ensure get_file_icon is defined? Yes it is.
+        try:
+            root_demo.setIcon(0, self.get_file_icon(NodeType.DIR))
+        except: pass 
+        
+        debug_tree.addTopLevelItem(root_demo)
+        
+        folder1 = QTreeWidgetItem(["Documents", "10 GB", "Dossier"])
+        try: folder1.setIcon(0, self.get_file_icon(NodeType.DIR))
+        except: pass
+        root_demo.addChild(folder1)
+        
+        file1 = QTreeWidgetItem(["Rapport_Projet.pdf", "2 MB", "Fichier"])
+        try: file1.setIcon(0, self.get_file_icon(NodeType.FILE, ".pdf"))
+        except: pass
+        
+        subfolder = QTreeWidgetItem(["Projet Kripta", "5 MB", "Dossier"])
+        try: subfolder.setIcon(0, self.get_file_icon(NodeType.DIR))
+        except: pass
+        folder1.addChild(subfolder)
+        subfolder.addChild(file1)
+        
+        root_demo.setExpanded(True)
+        folder1.setExpanded(True)
+        subfolder.setExpanded(True)
+        
+        layout_debug.addWidget(debug_tree)
+        left_layout.addWidget(group_debug)
+        
         content_splitter.addWidget(left_widget)
         
         # Right: Details and stats
@@ -423,9 +465,11 @@ class DiskAnalysisPage(QWidget):
         root_item.setData(0, Qt.ItemDataRole.UserRole, root_node.id)
         self.tree_widget.addTopLevelItem(root_item)
         
-        # Charger les enfants
+        # Charger le contenu du disque
         self.load_tree_children(root_item, root_node.id)
         root_item.setExpanded(True)
+        
+
     
     def load_tree_children(self, parent_item: QTreeWidgetItem, parent_id: int):
         """Charge les enfants d'un nœud dans l'arbre."""

@@ -154,7 +154,21 @@ class DiskScanner:
         
         # Le root parent_id doit être trouvé dans existing_paths ou via le callback
         root_id = existing_paths.get(disk_path)
-        
+        if root_id is None:
+            # Essayer avec ou sans slash final pour être robuste (ex: "C:" vs "C:\\")
+            if disk_path.endswith(os.sep):
+                root_id = existing_paths.get(disk_path.rstrip(os.sep))
+            else:
+                root_id = existing_paths.get(disk_path + os.sep)
+                
+            # Essayer aussi le slash inverse si window
+            if root_id is None and os.name == 'nt':
+                 alt_sep = '/' if os.sep == '\\' else '\\'
+                 if disk_path.endswith(alt_sep):
+                     root_id = existing_paths.get(disk_path.rstrip(alt_sep))
+                 else:
+                     root_id = existing_paths.get(disk_path + alt_sep)
+
         def scan_recursive(path: str, parent_id: Optional[int]):
             if self._stop_requested:
                 return

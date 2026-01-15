@@ -182,20 +182,25 @@ class SyncCoordinator:
                 
                 self.tantivy.commit()
         
-        # Supprimer les nœuds qui n'existent plus
-        deleted_paths = existing_paths - seen_paths
-        # Ne pas supprimer la racine si elle n'a pas été vue (cas du scanner qui liste les enfants)
-        if disk_path in deleted_paths:
-            deleted_paths.remove(disk_path)
-            
-        if deleted_paths:
-            with self.lock:
-                for path in deleted_paths:
-                    self.sqlite.delete_node(path)
-                    self.tantivy.delete_document(path)
-                
-                self.tantivy.commit()
+
     
+                self.tantivy.commit()
+        
+        # Mettre à jour la taille du dossier racine
+        with self.lock:
+            try:
+                # Rafraîchir le nœud racine
+                root_node = self.sqlite.get_node_by_path(disk_path)
+                if root_node and root_node.id:
+                    total_size = self.sqlite.get_folder_size(root_node.id)
+                    if total_size > 0:
+                        root_node.size = total_size
+                        self.sqlite.update_node(root_node)
+                        self.tantivy.update_document(root_node)
+                        self.tantivy.commit()
+            except Exception as e:
+                print(f"Erreur update taille racine: {e}")
+
     def stop_scan(self):
         """Arrête le scan en cours."""
         self.scanner.stop()
