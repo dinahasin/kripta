@@ -1,88 +1,71 @@
 """
-Sync coordinator for dual-data architecture (SQLite + Tantivy).
+Sync coordinator for SQLite-based storage and search.
+Utilise SQLite avec FTS5 pour la recherche full-text (plus simple et fiable).
 """
 
 from pathlib import Path
 from typing import List, Optional
+import logging
 from .models import Node, NodeType, DiskStats
 from .sqlite_service import SQLiteService
-from .tantivy_service import TantivyService
 from .scanner import DiskScanner
 from threading import Thread, Lock
 
 
 class SyncCoordinator:
-    """Coordonne les opérations entre SQLite et Tantivy."""
+    """Coordonne les opérations de stockage et recherche avec SQLite."""
     
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
         self.sqlite = SQLiteService(data_dir / "disk_analyzer.db")
-        self.tantivy = TantivyService(data_dir / "tantivy_index")
         self.scanner = DiskScanner()
         self.lock = Lock()
     
     def add_node(self, node: Node) -> int:
-        """Ajoute un nœud dans les deux bases."""
+        """Ajoute un nœud dans SQLite."""
         with self.lock:
-            # Ajouter dans SQLite
             node_id = self.sqlite.add_node(node)
             node.id = node_id
-            
-            # Ajouter dans Tantivy (commit sera fait par batch)
-            self.tantivy.add_document(node)
-            
             return node_id
     
     def update_node(self, node: Node) -> bool:
-        """Met à jour un nœud dans les deux bases."""
+        """Met à jour un nœud dans SQLite."""
         with self.lock:
-            # Mettre à jour SQLite
-            success = self.sqlite.update_node(node)
-            
-            if success:
-                # Mettre à jour Tantivy (commit sera fait par batch)
-                self.tantivy.update_document(node)
-            
-            return success
+            return self.sqlite.update_node(node)
     
     def delete_node(self, path: str) -> bool:
-        """Supprime un nœud des deux bases."""
+        """Supprime un nœud de SQLite."""
         with self.lock:
-            # Supprimer de SQLite
-            success = self.sqlite.delete_node(path)
-            
-            if success:
-                # Supprimer de Tantivy (commit sera fait par batch)
-                self.tantivy.delete_document(path)
-            
-            return success
+            return self.sqlite.delete_node(path)
     
-    def search(self, query: str, use_tantivy: bool = True, limit: int = 100) -> List[Node]:
+    def search(self, query: str, use_tantivy: bool = True, limit: int = 100, use_regex: bool = False) -> List[Node]:
         """
-        Recherche dans les bases.
+        Recherche dans SQLite avec FTS5 (recherche full-text intelligente).
         
         Args:
-            query: Requête de recherche
-            use_tantivy: Utiliser Tantivy (rapide) ou SQLite FTS5
+            query: Requête de recherche (peut être une regex ou pattern glob)
+            use_tantivy: Paramètre ignoré (conservé pour compatibilité)
             limit: Nombre maximum de résultats
+            use_regex: Force l'utilisation de regex (détection automatique si False)
         
         Returns:
             Liste des nœuds trouvés
         """
-        if use_tantivy:
-            # Recherche Tantivy (plus rapide)
-            results = self.tantivy.search(query, limit)
-            # Récupérer les nœuds complets depuis SQLite
-            nodes = []
-            for result in results:
-                node = self.sqlite.get_node_by_path(result['path'])
-                if node:
-                    nodes.append(node)
-            return nodes
+        # Détecter si c'est une vraie regex complexe ou un pattern glob
+        regex_chars = ['^', '$', '[', ']', '{', '}', '|', '(', ')', '+']
+        is_complex_regex = use_regex or any(char in query for char in regex_chars)
+        is_simple_glob = ('*' in query or '?' in query) and not is_complex_regex
+        
+        # Pour les regex complexes ou patterns glob, utiliser search_with_regex
+        # Pour les recherches texte simples, utiliser FTS5 (très intelligent pour correspondances partielles)
+        if is_complex_regex or is_simple_glob:
+            # Recherche regex/glob avec SQLite
+            return self.sqlite.search_with_regex(query, limit)
         else:
-            # Recherche SQLite FTS5
+            # Recherche texte simple avec SQLite FTS5
+            # FTS5 tokenise intelligemment et trouve "autodeks" dans "autodesk.iso"
             return self.sqlite.search_fts(query, limit)
     
     def get_children(self, parent_id: int, limit: Optional[int] = None) -> List[Node]:
@@ -101,6 +84,10 @@ class SyncCoordinator:
     def get_children_limited(self, parent_id: int, limit: int) -> List[Node]:
         """Récupère un nombre limité d'enfants d'un nœud (alias pour compatibilité)."""
         return self.sqlite.get_children(parent_id, limit)
+    
+    def get_node_by_id(self, node_id: int) -> Optional[Node]:
+        """Récupère un nœud par son ID."""
+        return self.sqlite.get_node_by_id(node_id)
     
     def get_node_by_path(self, path: str) -> Optional[Node]:
         """Récupère un nœud par son chemin (Robuste)."""
@@ -167,8 +154,6 @@ class SyncCoordinator:
                     )
                     node_id = self.sqlite.add_node(root_node)
                     root_node.id = node_id
-                    self.tantivy.add_document(root_node)
-                    self.tantivy.commit()
                 except Exception as e:
                     print(f"Erreur création racine {normalized_disk_path}: {e}")
         
@@ -178,35 +163,15 @@ class SyncCoordinator:
         
         # Callback d'insertion pour le scanner
         # Permet de récupérer l'ID immédiatement pour le passer aux enfants
-        documents_buffer = []
-        BATCH_SIZE = 1000
-        
         def insert_node(node: Node) -> int:
             with self.lock:
                 # SQLite (Insertion immédiate pour l'ID)
                 node_id = self.sqlite.add_node(node)
                 node.id = node_id
-                
-                # Tantivy (Batch)
-                documents_buffer.append(node)
-                if len(documents_buffer) >= BATCH_SIZE:
-                    for doc in documents_buffer:
-                        self.tantivy.add_document(doc)
-                    documents_buffer.clear()
-                    self.tantivy.commit()
-                
                 return node_id
         
         # Scanner le disque (utiliser le chemin normalisé)
-        # new_nodes est maintenant vide car traités par le callback
         _, seen_paths = self.scanner.scan_disk_incremental(normalized_disk_path, existing_paths, node_callback=insert_node)
-        
-        # Flusher le reste du buffer Tantivy
-        with self.lock:
-            if documents_buffer:
-                for doc in documents_buffer:
-                    self.tantivy.add_document(doc)
-                self.tantivy.commit()
                 
         if self.scanner._stop_requested:
             return
@@ -221,13 +186,6 @@ class SyncCoordinator:
             with self.lock:
                 for path in deleted_paths:
                     self.sqlite.delete_node(path)
-                    self.tantivy.delete_document(path)
-                
-                self.tantivy.commit()
-        
-
-    
-                self.tantivy.commit()
         
         # Mettre à jour la taille du dossier racine (utiliser le chemin normalisé)
         with self.lock:
@@ -239,8 +197,6 @@ class SyncCoordinator:
                     if total_size > 0:
                         root_node.size = total_size
                         self.sqlite.update_node(root_node)
-                        self.tantivy.update_document(root_node)
-                        self.tantivy.commit()
             except Exception as e:
                 print(f"Erreur update taille racine: {e}")
 
@@ -314,4 +270,3 @@ class SyncCoordinator:
     def close(self):
         """Ferme les connexions."""
         self.sqlite.close()
-        self.tantivy.close()

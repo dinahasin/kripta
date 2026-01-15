@@ -97,7 +97,7 @@ class DiskAnalysisPage(QWidget):
         toolbar_layout.addWidget(lbl_search)
         
         self.txt_search = QLineEdit()
-        self.txt_search.setPlaceholderText("Rechercher un fichier ou dossier...")
+        self.txt_search.setPlaceholderText("Rechercher un fichier ou dossier... (regex supportée: .*test.*)")
         self.txt_search.setMinimumHeight(28)
         self.txt_search.setMaximumWidth(400)  # Limite la largeur de la recherche
         self.txt_search.returnPressed.connect(self.perform_search)
@@ -189,7 +189,12 @@ class DiskAnalysisPage(QWidget):
         
         self.txt_details = QTextEdit()
         self.txt_details.setReadOnly(True)
-        self.txt_details.setMaximumHeight(150)
+        self.txt_details.setMaximumHeight(250)  # Augmenté pour afficher plus d'informations
+        # Utiliser une police monospace pour meilleure lisibilité
+        details_font = QFont("Consolas", 9)
+        if not details_font.exactMatch():
+            details_font = QFont("Courier New", 9)  # Alternative sur certains systèmes
+        self.txt_details.setFont(details_font)
         right_layout.addWidget(self.txt_details)
         
         # Custom Disk Usage Bar
@@ -565,27 +570,134 @@ class DiskAnalysisPage(QWidget):
         self.show_node_details(node_id)
     
     def show_node_details(self, node_id: int):
-        """Affiche les détails d'un nœud."""
-        # Récupérer le nœud depuis SQLite
-        # Pour l'instant, affichage simple
-        self.txt_details.setPlainText(f"ID: {node_id}\n\nDétails à implémenter...")
+        """Affiche les détails complets d'un nœud avec taille, pourcentage, etc."""
+        if not node_id:
+            self.txt_details.setPlainText("Aucun nœud sélectionné.")
+            return
+        
+        # Récupérer le nœud depuis la base de données
+        node = self.coordinator.get_node_by_id(node_id)
+        if not node:
+            self.txt_details.setPlainText(f"Nœud avec ID {node_id} introuvable.")
+            return
+        
+        # Récupérer les informations du disque pour calculer les pourcentages
+        disk_usage = self.coordinator.get_disk_usage(self.current_disk) if self.current_disk else None
+        total_disk_size = disk_usage["total"] if disk_usage else 0
+        used_disk_size = disk_usage["used"] if disk_usage else 0
+        
+        # Construire le texte des détails
+        details_lines = []
+        details_lines.append("=" * 50)
+        details_lines.append("📊 DÉTAILS DU NŒUD")
+        details_lines.append("=" * 50)
+        details_lines.append("")
+        
+        # Informations de base
+        details_lines.append(f"📁 Nom: {node.name}")
+        details_lines.append(f"🏷️  Type: {'Dossier' if node.type == NodeType.DIR else 'Fichier'}")
+        details_lines.append("")
+        # Chemin complet - mis en évidence
+        details_lines.append("=" * 50)
+        details_lines.append("📍 CHEMIN COMPLET:")
+        details_lines.append("=" * 50)
+        details_lines.append(node.path)
+        details_lines.append("")
+        details_lines.append("=" * 50)
+        details_lines.append("")
+        
+        # Taille
+        if node.type == NodeType.FILE:
+            # Pour un fichier, utiliser la taille directe
+            file_size = node.size
+            details_lines.append(f"💾 Taille: {self.format_size(file_size)}")
+        else:
+            # Pour un dossier, calculer la taille récursive
+            folder_size = self.coordinator.get_folder_size(node.id) if node.id else 0
+            details_lines.append(f"💾 Taille (récursive): {self.format_size(folder_size)}")
+            file_size = folder_size
+        
+        # Pourcentages
+        if total_disk_size > 0:
+            percent_of_total = (file_size / total_disk_size) * 100
+            details_lines.append(f"📊 Pourcentage du disque total: {percent_of_total:.4f}%")
+        
+        if used_disk_size > 0:
+            percent_of_used = (file_size / used_disk_size) * 100
+            details_lines.append(f"📊 Pourcentage de l'espace utilisé: {percent_of_used:.4f}%")
+        
+        details_lines.append("")
+        
+        # Informations supplémentaires pour les dossiers
+        if node.type == NodeType.DIR and node.id:
+            try:
+                children = self.coordinator.get_children(node.id, limit=None)
+                dirs_count = sum(1 for c in children if c.type == NodeType.DIR)
+                files_count = sum(1 for c in children if c.type == NodeType.FILE)
+                details_lines.append(f"📂 Nombre de dossiers: {dirs_count}")
+                details_lines.append(f"📄 Nombre de fichiers: {files_count}")
+                details_lines.append(f"📦 Total d'éléments: {len(children)}")
+                details_lines.append("")
+            except Exception as e:
+                details_lines.append(f"⚠️  Erreur lors du comptage: {e}")
+                details_lines.append("")
+        
+        # Informations de date
+        from datetime import datetime
+        try:
+            mtime_str = datetime.fromtimestamp(node.mtime).strftime("%Y-%m-%d %H:%M:%S")
+            details_lines.append(f"📅 Dernière modification: {mtime_str}")
+        except:
+            details_lines.append(f"📅 Dernière modification: {node.mtime}")
+        
+        try:
+            ctime_str = datetime.fromtimestamp(node.ctime).strftime("%Y-%m-%d %H:%M:%S")
+            details_lines.append(f"📅 Date de création: {ctime_str}")
+        except:
+            details_lines.append(f"📅 Date de création: {node.ctime}")
+        
+        details_lines.append("")
+        
+        # Extension pour les fichiers
+        if node.type == NodeType.FILE and node.extension:
+            details_lines.append(f"🔖 Extension: {node.extension}")
+            details_lines.append("")
+        
+        # ID technique
+        details_lines.append(f"🆔 ID: {node.id}")
+        if node.parent_id:
+            details_lines.append(f"👆 Parent ID: {node.parent_id}")
+        
+        # Afficher le texte formaté
+        self.txt_details.setPlainText("\n".join(details_lines))
     
     def perform_search(self):
-        """Effectue une recherche avec Tantivy."""
+        """Effectue une recherche avec SQLite FTS5 (support regex et full-text intelligent)."""
         query = self.txt_search.text().strip()
         if not query:
             return
         
         try:
-            results = self.coordinator.search(query, use_tantivy=True, limit=100)
+            # Détecter automatiquement si c'est une regex
+            # Les regex contiennent généralement des caractères spéciaux
+            regex_chars = ['.', '*', '+', '?', '^', '$', '[', ']', '{', '}', '|', '(', ')']
+            is_regex = any(char in query for char in regex_chars)
+            
+            # Effectuer la recherche avec support regex
+            results = self.coordinator.search(query, use_tantivy=True, limit=100, use_regex=is_regex)
             
             self.tree_widget.clear()
             
             if not results:
-                QMessageBox.information(self, "Recherche", "Aucun résultat trouvé.")
+                search_type = "regex" if is_regex else "texte"
+                QMessageBox.information(
+                    self, 
+                    "Recherche", 
+                    f"Aucun résultat trouvé.\n\nType de recherche: {search_type}"
+                )
                 return
             
-            # Afficher les résultats
+            # Afficher les résultats directement dans l'arborescence (temps réel)
             for node in results:
                 size_str = self.format_size(node.size) if node.type == NodeType.FILE else ""
                 type_str = "Dossier" if node.type == NodeType.DIR else "Fichier"
@@ -598,10 +710,25 @@ class DiskAnalysisPage(QWidget):
                 else:
                     icon = self.get_file_icon(node.extension)
                     item.setText(0, f"{icon} {node.name}")
-                    
-                item.setData(0, Qt.ItemDataRole.UserRole, node)  # Stocker le Node complet
-                item.setToolTip(0, node.path)
+                
+                # Stocker le Node complet pour pouvoir afficher les détails avec le chemin
+                item.setData(0, Qt.ItemDataRole.UserRole, node)
+                # Afficher le chemin complet dans le tooltip
+                item.setToolTip(0, f"Chemin complet: {node.path}")
+                
                 self.tree_widget.addTopLevelItem(item)
+            
+            # Afficher automatiquement les détails du premier résultat (avec le chemin)
+            if results:
+                first_item = self.tree_widget.topLevelItem(0)
+                if first_item:
+                    first_node = first_item.data(0, Qt.ItemDataRole.UserRole)
+                    if first_node and hasattr(first_node, 'id'):
+                        self.show_node_details(first_node.id)
+            
+            # Afficher un message informatif sur le type de recherche
+            search_type = "regex" if is_regex else "texte"
+            self.lbl_status.setText(f"Recherche {search_type}: {len(results)} résultat(s) trouvé(s)")
         
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur de recherche:\n{e}")

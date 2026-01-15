@@ -4,6 +4,7 @@ SQLite service for hierarchical storage and analytics.
 
 import sqlite3
 import os
+import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 from .models import Node, NodeType, DiskStats
@@ -232,6 +233,15 @@ class SQLiteService:
         self.conn.commit()
         return cursor.rowcount > 0
     
+    def get_node_by_id(self, node_id: int) -> Optional[Node]:
+        """Récupère un nœud par son ID."""
+        cursor = self.conn.execute("""
+            SELECT id, parent_id, type, name, path, size, mtime, ctime, extension
+            FROM nodes WHERE id = ?
+        """, (node_id,))
+        row = cursor.fetchone()
+        return Node.from_db_row(row) if row else None
+    
     def get_node_by_path(self, path: str) -> Optional[Node]:
         """
         Récupère un nœud par son chemin.
@@ -315,15 +325,102 @@ class SQLiteService:
         return cursor.rowcount > 0
     
     def search_fts(self, query: str, limit: int = 100) -> List[Node]:
-        """Recherche full-text sur nom et chemin."""
+        """
+        Recherche full-text intelligente sur nom et chemin.
+        SQLite FTS5 tokenise intelligemment et trouve des correspondances partielles.
+        Par exemple, "autodeks" trouvera "autodesk.iso" grâce à la tokenisation.
+        """
+        # SQLite FTS5 utilise une syntaxe spéciale pour la recherche
+        # On peut utiliser des préfixes avec * pour recherche partielle
+        # Par exemple: "autodeks*" trouvera "autodesk"
+        
+        # Construire la requête FTS5 avec préfixe pour recherche partielle
+        # FTS5 tokenise et trouve automatiquement des correspondances
+        fts_query = f"{query}*"  # Ajouter * pour recherche de préfixe
+        
+        try:
+            cursor = self.conn.execute("""
+                SELECT n.id, n.parent_id, n.type, n.name, n.path, n.size, n.mtime, n.ctime, n.extension
+                FROM nodes n
+                JOIN nodes_fts fts ON n.id = fts.rowid
+                WHERE nodes_fts MATCH ?
+                LIMIT ?
+            """, (fts_query, limit))
+            results = [Node.from_db_row(row) for row in cursor.fetchall()]
+            
+            # Si pas de résultats avec préfixe, essayer sans préfixe
+            if not results:
+                cursor = self.conn.execute("""
+                    SELECT n.id, n.parent_id, n.type, n.name, n.path, n.size, n.mtime, n.ctime, n.extension
+                    FROM nodes n
+                    JOIN nodes_fts fts ON n.id = fts.rowid
+                    WHERE nodes_fts MATCH ?
+                    LIMIT ?
+                """, (query, limit))
+                results = [Node.from_db_row(row) for row in cursor.fetchall()]
+            
+            return results
+        except Exception as e:
+            logging.error(f"Erreur recherche FTS5: {e}")
+            return []
+    
+    def search_with_regex(self, pattern: str, limit: int = 100) -> List[Node]:
+        """
+        Recherche avec expression régulière ou pattern glob sur nom et chemin.
+        
+        Args:
+            pattern: Pattern regex ou glob (comme *.iso) à rechercher
+            limit: Nombre maximum de résultats
+        
+        Returns:
+            Liste des nœuds correspondants
+        """
+        import re
+        
+        # Convertir les patterns glob en regex si nécessaire
+        # Détecter si c'est un pattern glob (contient * ou ? mais pas de caractères regex avancés)
+        is_glob = ('*' in pattern or '?' in pattern) and not any(c in pattern for c in ['^', '$', '[', ']', '{', '}', '|', '(', ')', '+'])
+        
+        if is_glob:
+            # Convertir le pattern glob en regex
+            # Échapper les caractères spéciaux sauf * et ?
+            escaped = re.escape(pattern)
+            # Remplacer les patterns glob
+            regex_pattern = escaped.replace(r'\*', '.*').replace(r'\?', '.')
+            # Ajouter $ à la fin pour correspondre à la fin du nom/chemin
+            if not regex_pattern.endswith('$'):
+                regex_pattern = regex_pattern + '$'
+        else:
+            regex_pattern = pattern
+        
+        try:
+            # Compiler la regex
+            regex = re.compile(regex_pattern, re.IGNORECASE)
+        except re.error as e:
+            # Si la regex est invalide, retourner une liste vide
+            logging.error(f"Regex invalide: {e}")
+            return []
+        
+        # Récupérer tous les nœuds et filtrer avec Python
+        # Pour l'efficacité, on limite à un nombre raisonnable
+        max_scan = min(limit * 50, 100000)  # Scanner jusqu'à 100k documents
         cursor = self.conn.execute("""
-            SELECT n.id, n.parent_id, n.type, n.name, n.path, n.size, n.mtime, n.ctime, n.extension
-            FROM nodes n
-            JOIN nodes_fts fts ON n.id = fts.rowid
-            WHERE nodes_fts MATCH ?
+            SELECT id, parent_id, type, name, path, size, mtime, ctime, extension
+            FROM nodes
             LIMIT ?
-        """, (query, limit))
-        return [Node.from_db_row(row) for row in cursor.fetchall()]
+        """, (max_scan,))
+        
+        matching_nodes = []
+        for row in cursor.fetchall():
+            node = Node.from_db_row(row)
+            # Vérifier si le nom ou le chemin correspond à la regex
+            if regex.search(node.name) or regex.search(node.path):
+                matching_nodes.append(node)
+                if len(matching_nodes) >= limit:
+                    break
+        
+        logging.info(f"Recherche regex: {len(matching_nodes)} résultats trouvés")
+        return matching_nodes
     
     def get_top_files(self, limit: int = 100) -> List[Node]:
         """Récupère les plus gros fichiers."""
