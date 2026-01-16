@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                                QListWidget, QListWidgetItem, QLabel, QLineEdit, 
-                               QTextEdit, QPushButton, QMessageBox, QSplitter, QFrame, QApplication)
+                               QTextEdit, QPushButton, QMessageBox, QSplitter, QFrame, QApplication, QSizePolicy)
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QFont, QColor, QDesktopServices
 from src.password_manager.service import PasswordManagerService
@@ -19,26 +19,26 @@ class PasswordManagerWidget(QWidget):
         self.setup_ui()
         self.apply_modern_style()
         self.refresh_list()
-        
-        # Définir une taille minimale pour la fenêtre
-        if parent:
-            parent.setMinimumSize(1100, 700)
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Header avec bouton retour
+        # Header avec bouton retour - TAILLE FIXE (ne s'étire pas)
         header = QWidget()
         header.setObjectName("header")
         header.setMinimumHeight(60)
+        header.setMaximumHeight(60)  # Taille fixe
+        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(20, 10, 20, 10)
         
         btn_back = QPushButton("← Retour")
         btn_back.setObjectName("btnBack")
         btn_back.setMinimumHeight(40)
+        btn_back.setMaximumHeight(40)  # Taille fixe
+        btn_back.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_back.clicked.connect(self.back_requested.emit)
         header_layout.addWidget(btn_back)
@@ -49,6 +49,7 @@ class PasswordManagerWidget(QWidget):
         title_font.setBold(True)
         lbl_title.setFont(title_font)
         lbl_title.setStyleSheet("color: #2c3e50;")
+        lbl_title.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         header_layout.addWidget(lbl_title)
         
         header_layout.addStretch()
@@ -69,22 +70,28 @@ class PasswordManagerWidget(QWidget):
         left_layout.setContentsMargins(20, 20, 20, 20)
         left_layout.setSpacing(15)
         
-        # Header for list
+        # Header for list - TAILLE FIXE
         lbl_list = QLabel("📋 Mes Mots de Passe")
         list_font = QFont()
         list_font.setPointSize(14)
         list_font.setBold(True)
         lbl_list.setFont(list_font)
         lbl_list.setStyleSheet("color: #ffffff; padding: 10px; background-color: transparent;")
+        lbl_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         left_layout.addWidget(lbl_list)
         
+        # Liste - S'ÉTIRE (Expanding)
         self.list_widget = QListWidget()
+        self.list_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.list_widget.itemClicked.connect(self.on_item_clicked)
-        left_layout.addWidget(self.list_widget)
+        left_layout.addWidget(self.list_widget, 1)  # Stretch factor = 1 pour qu'elle s'étire
         
+        # Bouton Ajouter - TAILLE FIXE
         btn_add = QPushButton("➕ Ajouter un mot de passe")
         btn_add.setObjectName("btnAdd")
         btn_add.setMinimumHeight(45)
+        btn_add.setMaximumHeight(45)  # Taille fixe
+        btn_add.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn_add.clicked.connect(self.on_add_clicked)
         btn_add.setCursor(Qt.CursorShape.PointingHandCursor)
         left_layout.addWidget(btn_add)

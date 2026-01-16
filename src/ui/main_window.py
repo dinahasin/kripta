@@ -109,6 +109,13 @@ class MainWindow(QMainWindow):
             self.password_manager_view.back_requested.connect(self._show_home)
             self.stacked_widget.addWidget(self.password_manager_view)
         
+        # Ajuster la taille de la fenêtre pour qu'elle soit grande (presque plein écran)
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        # Utiliser 90% de l'écran pour une taille confortable
+        self.resize(int(screen.width() * 0.9), int(screen.height() * 0.9))
+        self.move(int(screen.width() * 0.05), int(screen.height() * 0.05))
+        
         self.stacked_widget.setCurrentWidget(self.password_manager_view)
         self.setWindowTitle("Kripta - Gestionnaire de Mots de Passe")
     
@@ -120,6 +127,13 @@ class MainWindow(QMainWindow):
             self.disk_analyzer_view = DiskAnalyzerWidget(self)
             self.disk_analyzer_view.back_requested.connect(self._show_home)
             self.stacked_widget.addWidget(self.disk_analyzer_view)
+        
+        # Ajuster la taille de la fenêtre pour qu'elle soit grande (presque plein écran)
+        from PySide6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        # Utiliser 90% de l'écran pour une taille confortable
+        self.resize(int(screen.width() * 0.9), int(screen.height() * 0.9))
+        self.move(int(screen.width() * 0.05), int(screen.height() * 0.05))
         
         self.stacked_widget.setCurrentWidget(self.disk_analyzer_view)
         self.setWindowTitle("Kripta - Analyseur d'Espace Disque")

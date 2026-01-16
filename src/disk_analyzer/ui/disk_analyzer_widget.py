@@ -5,7 +5,7 @@ Disk Analyzer Widget - UI for space optimization.
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QTreeWidget, QTreeWidgetItem, QComboBox,
                                QProgressBar, QMessageBox, QSplitter, QTabWidget, QTextEdit,
-                               QTableWidget, QTableWidgetItem, QHeaderView)
+                               QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy)
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QSize
 from PySide6.QtGui import QFont, QMovie, QColor, QPainter, QBrush
 from pathlib import Path
@@ -63,9 +63,11 @@ class DiskAnalysisPage(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(10)
 
-        # Toolbar
+        # Toolbar - TAILLE FIXE (ne s'étire pas)
         toolbar = QWidget()
         toolbar.setObjectName("toolbar")
+        toolbar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        toolbar.setMaximumHeight(80)  # Limiter la hauteur
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(0, 0, 0, 10)
         toolbar_layout.setSpacing(15)
@@ -116,8 +118,10 @@ class DiskAnalysisPage(QWidget):
         
         layout.addWidget(toolbar)
         
-        # Loading area
+        # Loading area - TAILLE FIXE (ne s'étire pas)
         self.loading_container = QWidget()
+        self.loading_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.loading_container.setMaximumHeight(40)
         loading_layout = QHBoxLayout(self.loading_container)
         loading_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -134,15 +138,18 @@ class DiskAnalysisPage(QWidget):
         
         layout.addWidget(self.loading_container)
         
-        # Progress bar
+        # Progress bar - TAILLE FIXE (ne s'étire pas)
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setMinimumHeight(5)
+        self.progress_bar.setMaximumHeight(5)
+        self.progress_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_bar)
         
-        # Content area - Cette section doit s'étirer
+        # Content area - Cette section S'ÉTIRE (Expanding)
         content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # Left: Tree view
         left_widget = QWidget()
@@ -151,15 +158,19 @@ class DiskAnalysisPage(QWidget):
         left_layout.setContentsMargins(0, 0, 10, 0)
         left_layout.setSpacing(10)
         
+        # Label Arborescence - TAILLE FIXE
         lbl_tree = QLabel("📁 Arborescence")
         tree_font = QFont()
         tree_font.setPointSize(12)
         tree_font.setBold(True)
         lbl_tree.setFont(tree_font)
         lbl_tree.setStyleSheet("color: #2c3e50;")
+        lbl_tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         left_layout.addWidget(lbl_tree)
         
+        # Tree widget - S'ÉTIRE (Expanding)
         self.tree_widget = QTreeWidget()
+        self.tree_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tree_widget.setHeaderLabels(["Nom", "Taille", "Type"])
         self.tree_widget.setColumnWidth(0, 250)
         self.tree_widget.setAnimated(True)
@@ -182,14 +193,19 @@ class DiskAnalysisPage(QWidget):
         right_layout.setContentsMargins(10, 0, 0, 0)
         right_layout.setSpacing(15)
         
+        # Label Détails - TAILLE FIXE
         lbl_details = QLabel("📊 Détails")
         lbl_details.setFont(tree_font)
         lbl_details.setStyleSheet("color: #2c3e50;")
+        lbl_details.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         right_layout.addWidget(lbl_details)
         
+        # Zone de détails - TAILLE FIXE (ne s'étire pas)
         self.txt_details = QTextEdit()
         self.txt_details.setReadOnly(True)
-        self.txt_details.setMaximumHeight(250)  # Augmenté pour afficher plus d'informations
+        self.txt_details.setMinimumHeight(200)
+        self.txt_details.setMaximumHeight(250)  # Taille fixe
+        self.txt_details.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         # Utiliser une police monospace pour meilleure lisibilité
         details_font = QFont("Consolas", 9)
         if not details_font.exactMatch():
@@ -197,10 +213,13 @@ class DiskAnalysisPage(QWidget):
         self.txt_details.setFont(details_font)
         right_layout.addWidget(self.txt_details)
         
-        # Custom Disk Usage Bar
+        # Custom Disk Usage Bar - TAILLE FIXE
         self.disk_usage_bar = QProgressBar()
         self.disk_usage_bar.setTextVisible(True)
         self.disk_usage_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.disk_usage_bar.setMinimumHeight(40)
+        self.disk_usage_bar.setMaximumHeight(40)
+        self.disk_usage_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.disk_usage_bar.setStyleSheet("""
             QProgressBar {
                 border: 2px solid lightgrey;
@@ -216,13 +235,16 @@ class DiskAnalysisPage(QWidget):
         self.disk_usage_bar.setFormat("%p% Utilisé")
         right_layout.addWidget(self.disk_usage_bar)
         
+        # Label Statistiques - TAILLE FIXE
         lbl_stats = QLabel("📈 Statistiques (Top Fichiers)")
         lbl_stats.setFont(tree_font)
         lbl_stats.setStyleSheet("color: #2c3e50;")
+        lbl_stats.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         right_layout.addWidget(lbl_stats)
         
-        # Table pour les stats avec barres visuelles
+        # Table pour les stats - S'ÉTIRE (Expanding)
         self.table_stats = QTableWidget()
+        self.table_stats.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.table_stats.setColumnCount(4)
         self.table_stats.setHorizontalHeaderLabels(["Nom", "Barre", "Taille", "%"])
         self.table_stats.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -901,16 +923,20 @@ class DiskAnalyzerWidget(QWidget):
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Header commun
+        # Header commun - TAILLE FIXE (ne s'étire pas)
         header = QWidget()
         header.setObjectName("header")
         header.setMinimumHeight(60)
+        header.setMaximumHeight(60)  # Taille fixe
+        header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(20, 10, 20, 10)
         
         btn_back = QPushButton("← Retour")
         btn_back.setObjectName("btnBack")
         btn_back.setMinimumHeight(40)
+        btn_back.setMaximumHeight(40)  # Taille fixe
+        btn_back.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         btn_back.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_back.clicked.connect(self.back_requested.emit)
         header_layout.addWidget(btn_back)
@@ -921,14 +947,16 @@ class DiskAnalyzerWidget(QWidget):
         title_font.setBold(True)
         lbl_title.setFont(title_font)
         lbl_title.setStyleSheet("color: #2c3e50;")
+        lbl_title.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         header_layout.addWidget(lbl_title)
         
         header_layout.addStretch()
         main_layout.addWidget(header)
         
-        # Tabs
+        # Tabs - S'ÉTIRE (Expanding) - c'est ici que le contenu principal s'étire
         self.tabs = QTabWidget()
         self.tabs.setObjectName("mainTabs")
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # Page Analyse
         self.analysis_page = DiskAnalysisPage()
@@ -942,7 +970,7 @@ class DiskAnalyzerWidget(QWidget):
         self.tabs.addTab(self.analysis_page, "📊 Analyseur d'Espace")
         self.tabs.addTab(self.drive_manager, "💾 Gestion des Disques")
         
-        main_layout.addWidget(self.tabs)
+        main_layout.addWidget(self.tabs, 1)  # Stretch factor = 1 pour qu'il s'étire
         
     def switch_to_scan(self, path: str):
         """Passe à l'onglet scan et sélectionne le chemin."""

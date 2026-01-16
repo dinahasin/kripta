@@ -180,10 +180,33 @@ class SQLiteService:
         Ajoute un nœud et retourne son ID.
         Normalise le chemin et résout automatiquement le parent_id si nécessaire.
         Vérifie aussi que le parent_id fourni est correct.
+        Si le nœud existe déjà (même chemin), le met à jour et retourne son ID existant.
         """
         # Normaliser le chemin
         normalized_path = self.normalize_path(node.path)
         
+        # Vérifier si le nœud existe déjà
+        existing_node = self.get_node_by_path(normalized_path)
+        if existing_node:
+            # Le nœud existe déjà, mettre à jour ses informations et retourner son ID
+            node.id = existing_node.id
+            # Résoudre le parent_id correct
+            correct_parent_id = self.resolve_parent_id(normalized_path)
+            parent_id = node.parent_id
+            if parent_id is None:
+                parent_id = correct_parent_id
+            else:
+                if correct_parent_id is not None and parent_id != correct_parent_id:
+                    cursor_check = self.conn.execute("SELECT id FROM nodes WHERE id = ?", (parent_id,))
+                    if not cursor_check.fetchone():
+                        parent_id = correct_parent_id
+            
+            # Mettre à jour le nœud existant
+            node.parent_id = parent_id
+            self.update_node(node)
+            return existing_node.id
+        
+        # Le nœud n'existe pas, l'ajouter
         # Résoudre le parent_id correct depuis le chemin
         correct_parent_id = self.resolve_parent_id(normalized_path)
         
@@ -202,13 +225,28 @@ class SQLiteService:
                     parent_id = correct_parent_id
                 # Sinon, on garde le parent_id fourni (peut être valide si la hiérarchie est correcte)
         
-        cursor = self.conn.execute("""
-            INSERT INTO nodes (parent_id, type, name, path, size, mtime, ctime, extension)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (parent_id, node.type.value, node.name, normalized_path, 
-              node.size, node.mtime, node.ctime, node.extension))
-        self.conn.commit()
-        return cursor.lastrowid
+        try:
+            cursor = self.conn.execute("""
+                INSERT INTO nodes (parent_id, type, name, path, size, mtime, ctime, extension)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (parent_id, node.type.value, node.name, normalized_path, 
+                  node.size, node.mtime, node.ctime, node.extension))
+            self.conn.commit()
+            return cursor.lastrowid
+        except sqlite3.IntegrityError as e:
+            # Si l'erreur est due à une contrainte UNIQUE (chemin déjà existant)
+            # Récupérer le nœud existant et le retourner
+            logging.warning(f"Tentative d'insertion d'un chemin déjà existant: {normalized_path}. Mise à jour du nœud existant.")
+            existing_node = self.get_node_by_path(normalized_path)
+            if existing_node:
+                # Mettre à jour le nœud existant
+                node.id = existing_node.id
+                node.parent_id = parent_id
+                self.update_node(node)
+                return existing_node.id
+            else:
+                # Si on ne peut pas le trouver, relancer l'erreur
+                raise
     
     def update_node(self, node: Node) -> bool:
         """
